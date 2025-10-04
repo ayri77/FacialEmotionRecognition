@@ -1,27 +1,28 @@
-# venv
-.venv/
-# Python
+# python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
-.ipynb_checkpoints/
-# VSCode
-.vscode/
-# OS
-.DS_Store
-Thumbs.db
-# Data & outputs
-data/**/
-!data/docs/**
-!data/*.zip
-runs/
-reports/figures/*.png
-reports/figures/*.pdf
-# Models / checkpoints
-*.pth
-*.pt
-checkpoints/
-# Logs
+.venv/
+.env
 *.log
+.cache/
+.pytest_cache/
+
+# notebooks
+.ipynb_checkpoints/
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+.DS_Store
+
+# data & outputs
+data/
+data/**/*.zip
+data/**/raw/
+runs/
+reports/
+outputs/
+lightning_logs/

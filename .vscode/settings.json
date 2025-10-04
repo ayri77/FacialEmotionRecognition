@@ -1,0 +1,14 @@
+{
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    },
+    "python.analysis.typeCheckingMode": "basic",
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "isort.check": false,
+    "black-formatter.importStrategy": "fromEnvironment",
+    "terminal.integrated.env.windows": {
+        "PYTHONUTF8": "1"
+    }
+}
