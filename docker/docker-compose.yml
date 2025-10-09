@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  facial-emotion-gpu:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: facial-emotion-recognition-gpu
+
+    # Enable GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Mount project directory
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./notebooks:/workspace/notebooks
+      - ./models:/workspace/models
+      - ./runs:/workspace/runs
+      - ./reports:/workspace/reports
+
+    # Port mapping for Jupyter and TensorBoard
+    ports:
+      - "8888:8888"  # Jupyter Notebook
+      - "6006:6006"  # TensorBoard
+
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - CUDA_VISIBLE_DEVICES=0
+
+    # Keep container running
+    tty: true
+    stdin_open: true
+
+    # Working directory
+    working_dir: /workspace

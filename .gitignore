@@ -1,28 +1,79 @@
-# python
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
 *.pyc
 *.pyo
 *.pyd
-*.egg-info/
-.venv/
-.env
-*.log
-.cache/
-.pytest_cache/
 
-# notebooks
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+facial-emotion-gpu/
+
+# Jupyter Notebook
 .ipynb_checkpoints/
+*.ipynb_checkpoints
+*-checkpoint.ipynb
 
 # IDE
-.vscode/*
-!.vscode/settings.json
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
 .DS_Store
 
-# data & outputs
-data/
-data/**/*.zip
-data/**/raw/
+# Models and weights (large files)
+models/*.pth
+models/*.h5
+models/*.keras
+*.pth
+*.h5
+*.keras
+
+# Training artifacts
 runs/
-reports/
-outputs/
-lightning_logs/
+reports/*.png
+reports/*.csv
+reports/*.json
+
+# Data (don't commit large datasets)
+data/train/
+data/validation/
+data/test/
+data/*.zip
+
+# Keep docs folder
+!data/docs/
+
+# Logs
+*.log
+logs/
+
+# TensorBoard
+tensorboard_logs/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Docker
+docker/tensorboard_logs/
+
+# Conda
+*.conda

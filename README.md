@@ -1,173 +1,180 @@
-# Facial Emotion Recognition (FER)
+# Facial Emotion Recognition
 
-Recognize facial emotions — **happy**, **neutral**, **sad**, **surprise** — from grayscale/colored face images using PyTorch.
-This repository is organized for reproducible experiments with clear configs, modular code, and clean outputs.
+Deep Learning project for facial emotion recognition using CNN and Transfer Learning approaches.
 
-> Dataset folders are already provided in `data/` as three splits: `train/`, `validation/`, `test/`, each containing subfolders:
-> `happy/`, `neutral`, `sad`, `surprise/`.
+## 📊 Project Overview
 
----
+This project implements and compares multiple deep learning architectures for recognizing facial emotions from grayscale images. The dataset contains four emotion classes: happy, sad, neutral, and surprise.
 
-## 1) Project layout
+## 🎯 Objectives
+
+- Build custom CNN architectures optimized for emotion recognition
+- Compare Transfer Learning approaches (VGG16, ResNet50V2, EfficientNetV2B2)
+- Analyze performance trade-offs between model complexity and accuracy
+- Handle class imbalance in emotion datasets
+- Evaluate models using comprehensive metrics (accuracy, F1-scores, confusion matrices)
+
+## 📁 Project Structure
 
 ```
-facial-emotion-recognition/
-├─ configs/                 # YAML configs for experiments
-│   ├─ baseline_cnn.yaml
-│   └─ resnet18.yaml
-├─ data/                    # dataset (not tracked by git)
-│   ├─ train/{happy,neutral,sad,surprise}/
-│   ├─ validation/{happy,neutral,sad,surprise}/
-│   └─ test/{happy,neutral,sad,surprise}/
-├─ notebooks/               # EDA & quick experiments
-├─ reports/                 # figures, exported charts (gitignored)
-├─ runs/                    # logs, checkpoints, metrics (gitignored)
-├─ src/                     # source code (importable as a package)
-│   ├─ data/
-│   │   ├─ datamodule.py    # Dataset & DataLoaders
-│   │   └─ transforms.py    # Albumentations / Torch transforms
-│   ├─ models/
-│   │   ├─ baseline_cnn.py  # Small baseline CNN
-│   │   ├─ heads.py         # Classifier heads
-│   │   └─ utils.py         # Helpers (seeding, metrics, etc.)
-│   ├─ train.py             # Training entrypoint
-│   ├─ evaluate.py          # Evaluation & reports (CLS report, CM)
-│   └─ inference.py         # Single image / folder inference
-├─ .gitattributes           # Git LFS rules for model weights
-├─ .gitignore
-├─ .pre-commit-config.yaml  # Formatting & lint hooks
-├─ pyproject.toml           # Tooling configs (black, isort, ruff)
-├─ requirements.txt
-└─ README.md
+FacialEmotionRecognition/
+├── data/                          # Dataset directory
+│   ├── docs/                      # Problem statement and documentation
+│   ├── train/                     # Training images
+│   ├── validation/                # Validation images
+│   └── test/                      # Test images
+│
+├── notebooks/                     # Jupyter notebooks
+│   ├── Facial_Emotion_Recognition_Complete.ipynb    # Main analysis notebook
+│   └── Facial_Emotion_Recognition_Template.ipynb    # Template notebook
+│
+├── models/                        # Saved model checkpoints
+├── runs/                          # Training logs and artifacts
+├── reports/                       # Model comparison reports
+│
+├── docker/                        # Docker configuration
+│   ├── Dockerfile                 # Docker image definition
+│   ├── docker-compose.yml         # Docker Compose configuration
+│   ├── run_docker_gpu.ps1         # Windows launch script
+│   └── .dockerignore              # Docker ignore file
+│
+├── requirements.txt               # Python dependencies
+├── .gitignore                     # Git ignore file
+└── README.md                      # This file
 ```
 
----
+## 🚀 Quick Start
 
-## 2) Quick start
+### Option 1: Local Environment (CPU)
 
-### Create & activate virtual env
 ```bash
+# Create virtual environment
 python -m venv .venv
-# Windows:
-.venv\\Scripts\\activate
-# macOS / Linux:
-source .venv/bin/activate
-```
+.venv\Scripts\activate
 
-### Install dependencies
-```bash
-pip install --upgrade pip
+# Install dependencies
 pip install -r requirements.txt
+
+# Launch Jupyter
+jupyter notebook
 ```
 
-### (Optional, recommended) Git LFS for model weights
-```bash
-git lfs install
-# *.pt / *.pth / *.ckpt are already routed via LFS in .gitattributes
-```
-
-### (Optional) Pre-commit hooks for formatting/linting
-```bash
-pip install pre-commit
-pre-commit install
-```
-
----
-
-## 3) Configuration
-
-All training hyperparameters live in YAML files in `configs/`. Example keys you might see:
-
-```yaml
-# configs/baseline_cnn.yaml
-seed: 42
-data:
-  train_dir: data/train
-  val_dir: data/validation
-  test_dir: data/test
-  img_size: 224
-  batch_size: 64
-  num_workers: 4
-model:
-  name: baseline_cnn
-  num_classes: 4
-  dropout: 0.25
-optim:
-  name: adam
-  lr: 3e-4
-  weight_decay: 1e-4
-train:
-  epochs: 25
-  mixed_precision: false
-  early_stopping: true
-  checkpoint_dir: runs/baseline_cnn/
-```
-
-Adjust paths, image size, augmentations, and optimizer settings to your needs.
-
----
-
-## 4) Training
+### Option 2: Docker with GPU (Recommended)
 
 ```bash
-python -m src.train --config configs/baseline_cnn.yaml
-# or
-python -m src.train --config configs/resnet18.yaml
+# Navigate to docker directory
+cd docker
+
+# Build and run Docker container
+docker-compose up -d
+
+# Access Jupyter at http://localhost:8888
 ```
 
-Artifacts (checkpoints, logs, metrics) are written under `runs/<exp_name>/`.
-
----
-
-## 5) Evaluation
-
-Run on the **test** split and save a classification report + confusion matrix:
-
+**Useful Docker commands:**
 ```bash
-python -m src.evaluate \
-  --ckpt runs/baseline_cnn/best.pt \
-  --config configs/baseline_cnn.yaml
+# View logs
+docker logs facial-emotion-recognition-gpu
+
+# Check GPU
+docker exec facial-emotion-recognition-gpu nvidia-smi
+
+# Start TensorBoard monitoring
+docker exec -d facial-emotion-recognition-gpu tensorboard --logdir=/workspace/runs/tensorboard --host=0.0.0.0 --port=6006
+
+# Stop container
+docker-compose down
 ```
 
-Outputs (reports, figures) are stored under `reports/` and/or alongside the run directory.
+**Access Services:**
+- Jupyter Notebook: http://localhost:8888
+- TensorBoard: http://localhost:6006
+
+## 🧠 Models Implemented
+
+### Custom CNN Architectures
+1. **Baseline CNN** - 3 blocks, 288K parameters
+2. **Deep Regularized CNN** - 4 blocks with strong regularization, 1.96M parameters
+3. **Complex Custom CNN** - 5 blocks, heavy architecture, ~8-12M parameters
+
+### Transfer Learning Models
+4. **VGG16** - Pre-trained on ImageNet
+5. **ResNet50V2** - Residual connections for deeper networks
+6. **EfficientNetV2B2** - Compound scaling for efficiency
+
+## 📈 Key Features
+
+- **Class Imbalance Handling**: Computed class weights for balanced training
+- **Data Augmentation**: Horizontal flip, brightness, contrast adjustments
+- **Comprehensive Evaluation**: Accuracy, Macro F1, Weighted F1, Confusion matrices
+- **Experiment Tracking**: Automated logging of hyperparameters, metrics, and artifacts
+- **TensorBoard Monitoring**: Real-time visualization of training progress
+- **GPU Acceleration**: Docker setup with NVIDIA GPU support
+
+## 📊 Metrics & Evaluation
+
+Each model is evaluated using:
+- **Accuracy**: Overall classification accuracy
+- **Macro F1-Score**: Unweighted mean F1 across classes
+- **Weighted F1-Score**: Weighted by class frequency
+- **Confusion Matrix**: Detailed per-class performance
+- **Training Time**: Efficiency measurement
+
+## 🛠️ Technologies Used
+
+- **TensorFlow/Keras**: Deep learning framework
+- **NumPy/Pandas**: Data manipulation
+- **Matplotlib/Seaborn**: Visualization
+- **scikit-learn**: Metrics and evaluation
+- **Docker**: GPU-enabled containerization
+- **Jupyter**: Interactive development
+
+## 📝 Dataset
+
+The dataset consists of 48×48 grayscale facial images across four emotion categories:
+- **Training**: ~15,000 images
+- **Validation**: ~5,000 images
+- **Test**: 128 images (balanced)
+
+**Classes:**
+- Happy
+- Sad
+- Neutral
+- Surprise
+
+## 🏆 Results
+
+Detailed results and model comparisons are available in the `reports/` directory after training.
+
+## 📖 Usage
+
+1. **Exploratory Data Analysis**: Analyze class distribution and visualize samples
+2. **Model Training**: Train multiple architectures with different configurations
+3. **Evaluation**: Compare models using comprehensive metrics
+4. **Model Selection**: Choose best model based on test performance
+
+## 🔧 Requirements
+
+- **Python**: 3.11+ (for GPU) or 3.13+ (for CPU)
+- **TensorFlow**: 2.15+ with GPU support (Docker) or 2.20+ (CPU)
+- **CUDA**: 11.8+ (for Docker GPU)
+- **RAM**: 8GB minimum, 16GB recommended
+- **GPU**: NVIDIA GPU with 8GB+ VRAM recommended
+
+## 📚 References
+
+- TensorFlow Documentation
+- Keras Applications (Pre-trained Models)
+- scikit-learn Metrics
+
+## 👥 Author
+
+MIT Capstone Project - Facial Emotion Recognition
+
+## 📄 License
+
+Educational project for MIT course.
 
 ---
 
-## 6) Inference
-
-Predict a single image or all images in a folder:
-
-```bash
-# single image
-python -m src.inference \
-  --ckpt runs/baseline_cnn/best.pt \
-  --image path/to/face.jpg \
-  --config configs/baseline_cnn.yaml
-
-# folder
-python -m src.inference \
-  --ckpt runs/baseline_cnn/best.pt \
-  --folder path/to/folder \
-  --config configs/baseline_cnn.yaml
-```
-
----
-
-## 7) Notes & tips
-
-- **Class balance**: if classes are imbalanced, consider class weights or focal loss.
-- **Augmentations**: start simple (flip, rotate, brightness/contrast) and tune gradually.
-- **Reproducibility**: set seeds & deterministic flags (already included in utils).
-- **Model size**: prefer Git LFS for pushing checkpoints to GitHub.
-- **Hardware**: scripts auto-detect GPU/CPU; control mixed precision via config.
-
----
-
-## 8) License / Acknowledgements
-
-- Dataset provided as part of the assignment; please respect its license/usage terms.
-- Code in this repository is released for educational purposes.
-
----
-
-**Happy training!** 🚀
+**Note**: For GPU training, Docker with NVIDIA Container Toolkit is recommended on Windows.
