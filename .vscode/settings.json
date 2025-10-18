@@ -10,5 +10,6 @@
     "black-formatter.importStrategy": "fromEnvironment",
     "terminal.integrated.env.windows": {
         "PYTHONUTF8": "1"
-    }
+    },
+    "cursorpyright.analysis.typeCheckingMode": "basic"
 }

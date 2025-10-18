@@ -9,6 +9,11 @@ pyyaml>=6.0
 opencv-python>=4.9
 tensorflow>=2.15
 
+# hyperparameter optimization
+optuna>=3.5.0
+optuna-integration>=3.5.0  # For TensorFlow/Keras integration
+plotly>=5.18.0  # For Optuna visualizations
+
 # quality (optional but recommended)
 black>=24.3
 ruff>=0.5.0

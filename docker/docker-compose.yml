@@ -18,12 +18,12 @@ services:
 
     # Mount project directory
     volumes:
-      - ./:/workspace
-      - ./data:/workspace/data
-      - ./notebooks:/workspace/notebooks
-      - ./models:/workspace/models
-      - ./runs:/workspace/runs
-      - ./reports:/workspace/reports
+      - ../:/workspace
+      - ../data:/workspace/data
+      - ../notebooks:/workspace/notebooks
+      - ../models:/workspace/models
+      - ../runs:/workspace/runs
+      - ../reports:/workspace/reports
 
     # Port mapping for Jupyter and TensorBoard
     ports:

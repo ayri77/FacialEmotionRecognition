@@ -77,3 +77,5 @@ docker/tensorboard_logs/
 
 # Conda
 *.conda
+
+notebooks\Facial_Emotion_Recognition_Template.ipynb
