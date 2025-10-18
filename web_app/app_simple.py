@@ -481,6 +481,20 @@ def main():
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             st.error("❌ Could not open camera. Please check if camera is available.")
+            st.info(
+                """
+            **Camera Access Issues:**
+
+            **On Streamlit Cloud:** Camera access is not available due to browser security restrictions in cloud environments.
+
+            **Solutions:**
+            1. **Upload images** using the file uploader below
+            2. **Run locally** for full camera functionality
+            3. **Use Model Analysis** to view project results
+
+            **For local testing:** Make sure your camera is connected and not used by other applications.
+            """
+            )
             st.session_state.video_running = False
             return
 
@@ -629,17 +643,32 @@ def main():
         cap.release()
 
     else:
-        # File uploader
-        uploaded_file = st.file_uploader("Upload image", type=["png", "jpg", "jpeg"])
+        # File uploader and camera input
+        st.markdown("**Upload Image or Take Photo**")
 
-        if uploaded_file is not None:
-            print(f"DEBUG: File uploaded: {uploaded_file.name}")
+        # Try camera input first (works on some platforms)
+        camera_photo = st.camera_input("Take a photo with your camera")
+
+        # File uploader as alternative
+        uploaded_file = st.file_uploader(
+            "Or upload an image file", type=["png", "jpg", "jpeg"]
+        )
+
+        # Use camera photo if available, otherwise use uploaded file
+        image_to_process = camera_photo if camera_photo is not None else uploaded_file
+
+        if image_to_process is not None:
+            image_source = "camera" if camera_photo is not None else "upload"
+            print(
+                f"DEBUG: Image from {image_source}: {image_to_process.name if hasattr(image_to_process, 'name') else 'camera_photo'}"
+            )
+
             # Create two-column layout for image processing
             col_img, col_results = st.columns([1, 1])
 
             with col_img:
-                # Show uploaded image
-                image = Image.open(uploaded_file)
+                # Show image
+                image = Image.open(image_to_process)
                 print(f"DEBUG: Image opened, size: {image.size}")
                 st.image(image, width=400)
 
