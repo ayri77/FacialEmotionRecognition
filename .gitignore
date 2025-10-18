@@ -44,6 +44,9 @@ env/
 models/*.keras
 models/*.h5
 models/*.pkl
+notebooks/models/*.keras
+notebooks/models/*.h5
+notebooks/models/*.pkl
 
 # Data files (too large for GitHub)
 data/train/

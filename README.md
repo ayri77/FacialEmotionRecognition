@@ -38,7 +38,12 @@ This project implements a state-of-the-art facial emotion recognition system tha
    pip install -r requirements.txt
    ```
 
-4. **Run the application**
+4. **Download model files** (optional for local use)
+   - See [MODEL_DOWNLOAD.md](MODEL_DOWNLOAD.md) for instructions
+   - Models are too large for GitHub (>100MB)
+   - Application will create a demo model if no trained models are found
+
+5. **Run the application**
    ```bash
    # Windows
    run_app.bat
