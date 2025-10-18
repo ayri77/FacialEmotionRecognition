@@ -148,32 +148,53 @@ class EmotionRecognizer:
         return frame, None, None
 
 
+def download_model_from_drive():
+    """Download the best model from Google Drive"""
+    import requests
+
+    model_path = "models/converted_best_hpo_optimized.keras"
+    google_drive_url = "https://drive.google.com/uc?export=download&id=1NGqjNUpZahrmiztdnTgmnLgUqVre0Sp3"
+
+    try:
+        # Create models directory if it doesn't exist
+        os.makedirs("models", exist_ok=True)
+
+        # Download the model
+        st.info("Downloading the best emotion recognition model (79.2% accuracy)...")
+        response = requests.get(google_drive_url, stream=True)
+        response.raise_for_status()
+
+        # Save the model
+        with open(model_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        st.success("✅ Model downloaded successfully!")
+        return True
+
+    except Exception as e:
+        st.error(f"❌ Failed to download model: {str(e)}")
+        return False
+
+
 @st.cache_resource
 def load_emotion_model():
-    """Load the best trained emotion recognition model"""
+    """Load the best trained emotion recognition model (79.2% accuracy)"""
     try:
-        # Try to load models in order of preference
-        model_paths = [
-            "models/converted_best_hpo_optimized.keras",  # Successfully converted model
-            "models/best_hpo_optimized.keras",  # Original HPO model
-            "models/demo_model.keras",  # Demo model (guaranteed to work)
-        ]
+        # Load only the best model
+        model_path = "models/converted_best_hpo_optimized.keras"
 
-        for model_path in model_paths:
-            if os.path.exists(model_path):
+        if os.path.exists(model_path):
+            recognizer = EmotionRecognizer(model_path)
+            return recognizer
+        else:
+            # Try to download the model from Google Drive
+            if download_model_from_drive():
                 recognizer = EmotionRecognizer(model_path)
-
-                # Hide model loading messages - show only errors
-                # if "demo_model" in model_path:
-                #     st.warning("⚠️ Using demo model - this is not a trained model, just for demonstration purposes.")
-                #     st.info("💡 For real emotion recognition, use the original Docker environment with trained models.")
-                # elif "converted" in model_path:
-                #     st.success("🎉 Using converted trained model - this should provide real emotion recognition!")
-
                 return recognizer
-
-        st.error("❌ No compatible models found!")
-        return None
+            else:
+                st.error("❌ Best model not found and download failed!")
+                return None
 
     except Exception as e:
         st.error(f"❌ Error loading emotion model: {str(e)}")
@@ -249,6 +270,24 @@ def main():
     # Load model (hide loading messages)
     recognizer = load_emotion_model()
     if recognizer is None:
+        st.error("❌ Failed to load or create emotion recognition model!")
+        st.markdown(
+            """
+        **The application cannot run without a model.**
+
+        **Options:**
+        1. **Use Model Analysis mode** - View comprehensive project results without real-time detection
+        2. **Download trained models** - See [MODEL_DOWNLOAD.md](../MODEL_DOWNLOAD.md) for instructions
+        3. **Run locally with models** - Copy models to the `models/` directory
+
+        **For demonstration purposes**, you can use the Model Analysis mode to see all project achievements and model performance.
+        """
+        )
+
+        if st.button("← Back to Main Menu"):
+            st.session_state.app_mode = "Model Analysis"
+            st.rerun()
+
         st.stop()
 
     # Initialize session state
