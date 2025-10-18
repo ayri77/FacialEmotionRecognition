@@ -148,18 +148,18 @@ class EmotionRecognizer:
         return frame, None, None
 
 
-def download_model_from_drive():
-    """Download the best model from Google Drive"""
+def download_model_from_dropbox():
+    """Download the best model from Dropbox"""
     import requests
 
     # Use absolute path for Streamlit Cloud
     model_path = os.path.join(os.getcwd(), "converted_best_hpo_optimized.keras")
-    google_drive_url = "https://drive.google.com/uc?export=download&id=1NGqjNUpZahrmiztdnTgmnLgUqVre0Sp3"
+    dropbox_url = "https://www.dropbox.com/scl/fi/sx5r2umettw1ul8a2jb20/converted_best_hpo_optimized.keras?rlkey=qj150k3qhvdsiy59m7aktgh3u&st=rlqyj1q5&dl=1"
 
     try:
         # Download the model
         st.info("Downloading the best emotion recognition model (79.2% accuracy)...")
-        response = requests.get(google_drive_url, stream=True)
+        response = requests.get(dropbox_url, stream=True)
         response.raise_for_status()
 
         # Save the model to current directory
@@ -167,11 +167,11 @@ def download_model_from_drive():
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        st.success("✅ Model downloaded successfully!")
+        st.success("Model downloaded successfully!")
         return True
 
     except Exception as e:
-        st.error(f"❌ Failed to download model: {str(e)}")
+        st.error(f"Failed to download model: {str(e)}")
         return False
 
 
@@ -198,17 +198,17 @@ def load_emotion_model():
             recognizer = EmotionRecognizer(model_path)
             return recognizer
         else:
-            # Try to download the model from Google Drive
-            if download_model_from_drive():
+            # Try to download the model from Dropbox
+            if download_model_from_dropbox():
                 # Try to find the downloaded model
                 for path in possible_paths:
                     if os.path.exists(path):
                         recognizer = EmotionRecognizer(path)
                         return recognizer
-                st.error("❌ Model downloaded but not found!")
+                st.error("Model downloaded but not found!")
                 return None
             else:
-                st.error("❌ Best model not found and download failed!")
+                st.error("Best model not found and download failed!")
                 return None
 
     except Exception as e:
