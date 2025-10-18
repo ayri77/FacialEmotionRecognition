@@ -152,19 +152,17 @@ def download_model_from_drive():
     """Download the best model from Google Drive"""
     import requests
 
-    model_path = "models/converted_best_hpo_optimized.keras"
+    # Use absolute path for Streamlit Cloud
+    model_path = os.path.join(os.getcwd(), "converted_best_hpo_optimized.keras")
     google_drive_url = "https://drive.google.com/uc?export=download&id=1NGqjNUpZahrmiztdnTgmnLgUqVre0Sp3"
 
     try:
-        # Create models directory if it doesn't exist
-        os.makedirs("models", exist_ok=True)
-
         # Download the model
         st.info("Downloading the best emotion recognition model (79.2% accuracy)...")
         response = requests.get(google_drive_url, stream=True)
         response.raise_for_status()
 
-        # Save the model
+        # Save the model to current directory
         with open(model_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
@@ -181,17 +179,34 @@ def download_model_from_drive():
 def load_emotion_model():
     """Load the best trained emotion recognition model (79.2% accuracy)"""
     try:
-        # Load only the best model
-        model_path = "models/converted_best_hpo_optimized.keras"
+        # Try different possible paths for the model
+        possible_paths = [
+            "models/converted_best_hpo_optimized.keras",  # Local development
+            "converted_best_hpo_optimized.keras",  # Streamlit Cloud root
+            os.path.join(
+                os.getcwd(), "converted_best_hpo_optimized.keras"
+            ),  # Absolute path
+        ]
 
-        if os.path.exists(model_path):
+        model_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                model_path = path
+                break
+
+        if model_path:
             recognizer = EmotionRecognizer(model_path)
             return recognizer
         else:
             # Try to download the model from Google Drive
             if download_model_from_drive():
-                recognizer = EmotionRecognizer(model_path)
-                return recognizer
+                # Try to find the downloaded model
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        recognizer = EmotionRecognizer(path)
+                        return recognizer
+                st.error("❌ Model downloaded but not found!")
+                return None
             else:
                 st.error("❌ Best model not found and download failed!")
                 return None
