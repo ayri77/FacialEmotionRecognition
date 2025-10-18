@@ -150,7 +150,8 @@ def show_realtime_detection():
 
             if st.button("Switch to Model Analysis", type="primary"):
                 st.session_state.app_mode = "Model Analysis"
-                st.rerun()
+                # Avoid rerun to prevent recursion - just update session state
+                pass
 
         with col2:
             st.subheader("Experimental")

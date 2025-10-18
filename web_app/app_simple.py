@@ -3,8 +3,10 @@ Simple Facial Emotion Recognition App
 This version avoids caching issues and focuses on functionality
 """
 
+import logging
 import os
 import time
+import warnings
 from collections import deque
 
 import cv2
@@ -17,13 +19,10 @@ from tensorflow.keras.models import load_model
 # Suppress TensorFlow warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-import warnings
 
 warnings.filterwarnings("ignore")
 
 # Suppress TensorFlow deprecation warnings
-import logging
-
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 EMOTION_LABELS = ["happy", "neutral", "sad", "surprise"]
@@ -85,27 +84,41 @@ class EmotionRecognizer:
 
     def process_frame(self, frame):
         """Detect faces, predict emotions, and draw on frame"""
+        print(f"DEBUG: process_frame called, model is None: {self.model is None}")
+
         if self.model is None:
+            print("DEBUG: Model is None, returning None")
             return frame, None, None
+
+        print(f"DEBUG: Frame shape: {frame.shape}")
+        print(f"DEBUG: Face cascade is None: {self.face_cascade is None}")
 
         # Try face detection first
         if self.face_cascade is not None:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(gray, 1.1, 4)
+            print(f"DEBUG: Found {len(faces)} faces")
 
             if len(faces) > 0:
                 largest_face = max(faces, key=lambda x: x[2] * x[3])
                 x, y, w, h = largest_face
                 face_roi = frame[y : y + h, x : x + w]
+                print(f"DEBUG: Face ROI shape: {face_roi.shape}")
 
                 processed_face = self.preprocess_face(face_roi, self.model_input_size)
                 if processed_face is not None:
+                    print(f"DEBUG: Processed face shape: {processed_face.shape}")
                     predictions = self.model.predict(processed_face, verbose=0)[0]
                     confidence_scores = predictions * 100
+                    print(f"DEBUG: Predictions: {predictions}")
+                    print(f"DEBUG: Confidence scores: {confidence_scores}")
 
                     best_emotion_idx = np.argmax(confidence_scores)
                     best_emotion = self.emotion_labels[best_emotion_idx]
                     best_confidence = confidence_scores[best_emotion_idx]
+                    print(
+                        f"DEBUG: Best emotion: {best_emotion} ({best_confidence:.1f}%)"
+                    )
 
                     # Draw rectangle and text
                     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
@@ -119,19 +132,33 @@ class EmotionRecognizer:
                         2,
                     )
                     return frame, best_emotion, confidence_scores
+                else:
+                    print("DEBUG: Failed to preprocess face")
+            else:
+                print("DEBUG: No faces detected")
 
         # Fallback: if no face detected or face detection failed,
         # try to process the entire frame (useful for 48x48 images)
-        if frame.shape[:2] == (48, 48) or frame.shape[:2] == (48, 48, 3):
+        print(f"DEBUG: Trying fallback, frame shape: {frame.shape}")
+        if frame.shape[:2] == (48, 48) or (
+            len(frame.shape) == 3 and frame.shape[:2] == (48, 48)
+        ):
+            print("DEBUG: Frame is 48x48, processing as face image")
             # This might be a 48x48 face image
             processed_face = self.preprocess_face(frame, self.model_input_size)
             if processed_face is not None:
+                print(f"DEBUG: Fallback processed face shape: {processed_face.shape}")
                 predictions = self.model.predict(processed_face, verbose=0)[0]
                 confidence_scores = predictions * 100
+                print(f"DEBUG: Fallback predictions: {predictions}")
+                print(f"DEBUG: Fallback confidence scores: {confidence_scores}")
 
                 best_emotion_idx = np.argmax(confidence_scores)
                 best_emotion = self.emotion_labels[best_emotion_idx]
                 best_confidence = confidence_scores[best_emotion_idx]
+                print(
+                    f"DEBUG: Fallback best emotion: {best_emotion} ({best_confidence:.1f}%)"
+                )
 
                 # Draw text on frame
                 cv2.putText(
@@ -144,7 +171,12 @@ class EmotionRecognizer:
                     1,
                 )
                 return frame, best_emotion, confidence_scores
+            else:
+                print("DEBUG: Fallback preprocessing failed")
+        else:
+            print(f"DEBUG: Frame is not 48x48, shape: {frame.shape}")
 
+        print("DEBUG: No processing possible, returning None")
         return frame, None, None
 
 
@@ -301,7 +333,8 @@ def main():
 
         if st.button("← Back to Main Menu"):
             st.session_state.app_mode = "Model Analysis"
-            st.rerun()
+            # Avoid rerun to prevent recursion - just update session state
+            pass
 
         st.stop()
 
@@ -342,7 +375,8 @@ def main():
         with col1:
             if st.button("Start", key="start_video"):
                 st.session_state.video_running = True
-                st.rerun()
+                # Avoid rerun to prevent recursion - just update session state
+                pass
 
         with col2:
             if st.button("Stop", key="stop_video"):
@@ -358,17 +392,19 @@ def main():
                         try:
                             list(st.session_state.recent_predictions)
                             st.session_state.recent_predictions.clear()
-                        except:
+                        except Exception:
                             # If deque is corrupted, reinitialize it
                             st.session_state.recent_predictions = deque(maxlen=5)
                     else:
                         # Initialize if doesn't exist
                         st.session_state.recent_predictions = deque(maxlen=5)
-                    st.rerun()
+                    # Avoid rerun to prevent recursion - just update session state
+                    pass
                 except Exception as e:
                     st.error(f"Error stopping video: {e}")
                     st.session_state.video_running = False
-                    st.rerun()
+                    # Avoid rerun to prevent recursion - just update session state
+                    pass
 
         st.markdown("---")
 
@@ -452,13 +488,15 @@ def main():
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
 
         frame_count = 0
-        while st.session_state.video_running:
+        max_frames = 1000  # Limit to prevent infinite loops
+        while st.session_state.video_running and frame_count < max_frames:
             ret, frame = cap.read()
             if not ret:
                 st.error("❌ Failed to read from camera")
                 break
 
             frame_count += 1
+            print(f"DEBUG: Processing frame {frame_count}")
 
             # Process frame
             frame, best_emotion, confidence_scores = recognizer.process_frame(frame)
@@ -474,7 +512,7 @@ def main():
                     st.session_state.recent_predictions = deque(maxlen=5)
                     try:
                         st.session_state.recent_predictions.append(confidence_scores)
-                    except:
+                    except Exception:
                         pass  # Skip if still failing
 
                 # Update history
@@ -583,6 +621,11 @@ def main():
 
             time.sleep(0.1)
 
+        # Check if we hit the frame limit
+        if frame_count >= max_frames:
+            st.warning(f"⚠️ Reached maximum frame limit ({max_frames}). Stopping video.")
+            st.session_state.video_running = False
+
         cap.release()
 
     else:
@@ -590,18 +633,26 @@ def main():
         uploaded_file = st.file_uploader("Upload image", type=["png", "jpg", "jpeg"])
 
         if uploaded_file is not None:
+            print(f"DEBUG: File uploaded: {uploaded_file.name}")
             # Create two-column layout for image processing
             col_img, col_results = st.columns([1, 1])
 
             with col_img:
                 # Show uploaded image
                 image = Image.open(uploaded_file)
+                print(f"DEBUG: Image opened, size: {image.size}")
                 st.image(image, width=400)
 
             with col_results:
                 # Process frame
+                print("DEBUG: Converting image to frame")
                 frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                print(f"DEBUG: Frame converted, shape: {frame.shape}")
+                print("DEBUG: Calling process_frame")
                 frame, best_emotion, confidence_scores = recognizer.process_frame(frame)
+                print(
+                    f"DEBUG: process_frame returned: emotion={best_emotion}, scores={confidence_scores is not None}"
+                )
 
                 if best_emotion is not None and confidence_scores is not None:
                     st.markdown(
