@@ -621,17 +621,23 @@ def main():
                 )
                 st.session_state.webrtc_ctx = webrtc_ctx
 
-                # ⛔️ убираем частые st.rerun — это и вызывает 'Maximum call stack size exceeded'
-                # если очень нужно подпуливать правую панель — делаем это не чаще 1 раза/сек и только когда playing
+                # Автоматическое обновление UI когда распознавание активно
                 is_playing = bool(webrtc_ctx and webrtc_ctx.state.playing)
-                if is_playing:
+                recognition_active = st.session_state.get("recognition_active", False)
+
+                if is_playing and recognition_active:
                     last = st.session_state.get("last_refresh_ts", 0.0)
                     now = time.time()
-                    if (now - last) > max(1.0, float(update_frequency)):
+                    if (now - last) > max(0.5, float(update_frequency)):
                         st.session_state["last_refresh_ts"] = now
-                        # Важно: НЕ rerun здесь. Прававая панель будет обновляться за счёт следующих интеракций streamlit-webrtc.
+                        # Обновляем UI для активного распознавания
+                        st.rerun()
                         if DEBUG:
-                            st.caption("↻ tick (no rerun)")
+                            st.caption("↻ auto-refresh (recognition active)")
+                elif is_playing:
+                    # Видео играет, но распознавание не активно - показываем тик без обновления
+                    if DEBUG:
+                        st.caption("↻ tick (no rerun - recognition paused)")
 
                 # Status updates through fixed placeholder
                 if webrtc_ctx.state.playing and webrtc_ctx.video_processor:
@@ -652,7 +658,7 @@ def main():
             st.caption("Results")
 
             # Recognition control buttons
-            col_start, col_stop = st.columns(2)
+            col_start, col_stop, col_status = st.columns([1, 1, 1])
             with col_start:
                 if st.button(
                     "▶️ Start Recognition", type="primary", key="start_recognition"
@@ -663,6 +669,12 @@ def main():
                 if st.button("⏹️ Stop Recognition", key="stop_recognition"):
                     st.session_state.recognition_active = False
                     st.info("Recognition stopped!")
+            with col_status:
+                # Status indicator
+                if st.session_state.get("recognition_active", False):
+                    st.success("🟢 Active")
+                else:
+                    st.info("⏸️ Paused")
 
             # Initialize recognition state if not exists
             if "recognition_active" not in st.session_state:
@@ -703,6 +715,9 @@ def main():
                         "playing": bool(webrtc_ctx and webrtc_ctx.state.playing),
                         "ctx_exists": webrtc_ctx is not None,
                         "processor_exists": processor is not None,
+                        "recognition_active": st.session_state.get(
+                            "recognition_active", False
+                        ),
                     }
                     if processor is not None:
                         snap = snapshot(processor)
