@@ -42,6 +42,9 @@ EMOTION_COLORS = {
 _MODEL = None
 _MODEL_PATH = None
 
+# Debug mode toggle
+DEBUG = st.sidebar.toggle("🔧 Debug mode", value=True, key="debug_mode")
+
 
 def get_model_once(model_path):
     """Simple thread-safe model cache without Streamlit dependencies"""
@@ -84,6 +87,10 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.last_scores = None  # Keep last good scores
         self.hold_s = 0.8  # Hold scores for 0.8 seconds
 
+        # Debug logging throttling
+        self._last_log_ts = 0.0
+        self.model_id = id(self.model)
+
     def preprocess_face(self, face, target_size):
         face_resized = cv2.resize(face, target_size)
         if len(face_resized.shape) == 3:
@@ -114,6 +121,17 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                     (0, 255, 0),
                     2,
                 )
+                # Debug: show model ID
+                if DEBUG:
+                    cv2.putText(
+                        img,
+                        f"id:{self.model_id}",
+                        (x, y + h + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        1,
+                    )
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         if not self.model_loaded:
@@ -125,7 +143,7 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
             self.last_update = now
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(
-                gray, scaleFactor=1.2, minNeighbors=5, minSize=(60, 60)
+                gray, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40)
             )  # More stable face detection parameters
             if len(faces) > 0:
                 x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
@@ -146,6 +164,21 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                         f"{self.current_emotion}: {self.current_confidence:.1f}%"
                     )
                     self.last_seen = now
+
+                # Debug logging (throttled to 1 Hz)
+                if DEBUG and (now - self._last_log_ts) > 1.0:
+                    print(
+                        "[PROC] face=({},{},{},{}) emot={} conf={:.1f}% scores={}".format(
+                            x,
+                            y,
+                            w,
+                            h,
+                            self.current_emotion,
+                            self.current_confidence,
+                            np.round(scores, 1),
+                        )
+                    )
+                    self._last_log_ts = now
             else:
                 # If recently had face - don't reset, show previous
                 if self.last_scores is not None and (now - self.last_seen) < max(
@@ -162,7 +195,16 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                         self.current_confidence = None
                         self.current_scores = None
                         # Don't clear last_scores immediately - let UI catch up
-                        # self.last_scores = None  # Keep for UI that updates later
+
+                # Debug logging for no face case
+                if DEBUG and (now - self._last_log_ts) > 1.0:
+                    print(
+                        "[PROC] no_face last_scores={} last_seen={:.2f}s ago".format(
+                            self.last_scores is not None, now - self.last_seen
+                        )
+                    )
+                    self._last_log_ts = now
+                    # self.last_scores = None  # Keep for UI that updates later
 
         # Draw last known overlay on EVERY frame
         self._draw_overlay(img)
@@ -359,6 +401,14 @@ def main():
 
     # Load model object for WebRTC processor
     model_obj = get_model_once(model_path)
+
+    # Debug: show model information
+    if DEBUG:
+        print("[MAIN] model_path=", model_path)
+        print("[MAIN] model_id=", id(model_obj))
+        st.info(
+            f"🧠 Model loaded: `{os.path.basename(model_path)}` (id={id(model_obj)})"
+        )
 
     # Initialize session state
     if "emotion_history" not in st.session_state:
@@ -572,21 +622,17 @@ def main():
                 )
                 st.session_state.webrtc_ctx = webrtc_ctx
 
-                # Auto-refresh UI only when WebRTC is actually playing
+                # ⛔️ убираем частые st.rerun — это и вызывает 'Maximum call stack size exceeded'
+                # если очень нужно подпуливать правую панель — делаем это не чаще 1 раза/сек и только когда playing
                 is_playing = bool(webrtc_ctx and webrtc_ctx.state.playing)
-                need_auto_refresh = (
-                    video_mode == "WebRTC (Real-time)"
-                    and st.session_state.get("video_running", False)
-                    and is_playing
-                )
-                if need_auto_refresh:
+                if is_playing:
+                    last = st.session_state.get("last_refresh_ts", 0.0)
                     now = time.time()
-                    interval = float(update_frequency)  # seconds
-                    if now - st.session_state.get("last_refresh", 0.0) >= max(
-                        0.3, interval
-                    ):
-                        st.session_state["last_refresh"] = now
-                        st.rerun()
+                    if (now - last) > max(1.0, float(update_frequency)):
+                        st.session_state["last_refresh_ts"] = now
+                        # Важно: НЕ rerun здесь. Прававая панель будет обновляться за счёт следующих интеракций streamlit-webrtc.
+                        if DEBUG:
+                            st.caption("↻ tick (no rerun)")
 
                 # Status updates through fixed placeholder
                 if webrtc_ctx.state.playing and webrtc_ctx.video_processor:
@@ -605,6 +651,9 @@ def main():
 
         with col_stats:
             st.caption("Results")
+
+            # Debug panel
+            dbg_box = st.expander("🔎 Debug panel", expanded=DEBUG)
 
             # Single placeholder for results with throttling
             results_ph = st.empty()
@@ -631,6 +680,34 @@ def main():
                     else st.session_state.get("webrtc_ctx")
                 )
                 processor = getattr(active_ctx, "video_processor", None)
+
+                # Debug information
+                if DEBUG:
+                    ctx_info = {
+                        "playing": bool(webrtc_ctx and webrtc_ctx.state.playing),
+                        "ctx_exists": webrtc_ctx is not None,
+                        "processor_exists": processor is not None,
+                    }
+                    if processor is not None:
+                        snap = snapshot(processor)
+                        dbg_box.write("**ctx:**")
+                        dbg_box.json(ctx_info)
+                        dbg_box.write("**proc snapshot:**")
+                        dbg_box.json(
+                            {
+                                "loaded": snap["loaded"],
+                                "ready": snap["ready"],
+                                "emotion": snap["emotion"],
+                                "conf": snap["conf"],
+                                "scores": (
+                                    [float(x) for x in snap["scores"]]
+                                    if snap["scores"] is not None
+                                    else None
+                                ),
+                            }
+                        )
+                    else:
+                        dbg_box.json(ctx_info)
 
                 if processor is None:
                     results_ph.info("🔄 Connecting WebRTC…")
