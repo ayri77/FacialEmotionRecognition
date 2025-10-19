@@ -6,7 +6,7 @@ streamlit-autorefresh==1.0.1
 # WebRTC
 aiortc==1.8.0
 pylibsrtp==0.10.0
-av==11.0.0
+av==10.0.0
 
 numpy==1.26.4
 scipy==1.11.4
