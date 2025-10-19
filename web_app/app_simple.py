@@ -166,19 +166,11 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                     self.last_seen = now
 
                 # Debug logging (throttled to 1 Hz)
-                if DEBUG and (now - self._last_log_ts) > 1.0:
+                if (time.time() - self._last_log_ts) > 1.0:
                     print(
-                        "[PROC] face=({},{},{},{}) emot={} conf={:.1f}% scores={}".format(
-                            x,
-                            y,
-                            w,
-                            h,
-                            self.current_emotion,
-                            self.current_confidence,
-                            np.round(scores, 1),
-                        )
+                        f"[PROC] face k={k} {self.current_emotion} conf={self.current_confidence:.1f} scores={np.round(scores,1)}"
                     )
-                    self._last_log_ts = now
+                    self._last_log_ts = time.time()
             else:
                 # If recently had face - don't reset, show previous
                 if self.last_scores is not None and (now - self.last_seen) < max(
@@ -197,13 +189,11 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                         # Don't clear last_scores immediately - let UI catch up
 
                 # Debug logging for no face case
-                if DEBUG and (now - self._last_log_ts) > 1.0:
+                if (time.time() - self._last_log_ts) > 1.0:
                     print(
-                        "[PROC] no_face last_scores={} last_seen={:.2f}s ago".format(
-                            self.last_scores is not None, now - self.last_seen
-                        )
+                        f"[PROC] no_face age={time.time()-self.last_seen:.2f}s last_scores={self.last_scores is not None}"
                     )
-                    self._last_log_ts = now
+                    self._last_log_ts = time.time()
                     # self.last_scores = None  # Keep for UI that updates later
 
         # Draw last known overlay on EVERY frame
@@ -214,12 +204,18 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
 def snapshot(proc):
     """Safely read processor data with lock"""
     with proc._lock:
+        scores = (
+            proc.current_scores if proc.current_scores is not None else proc.last_scores
+        )
         return {
             "ready": proc.ready.is_set(),
             "loaded": proc.model_loaded,
             "emotion": proc.current_emotion,
             "conf": proc.current_confidence,
-            "scores": proc.current_scores or proc.last_scores,
+            "scores": (
+                None if scores is None else np.asarray(scores, dtype=float).tolist()
+            ),
+            "last_seen_age": time.time() - proc.last_seen if proc.last_seen else None,
         }
 
 
