@@ -746,6 +746,7 @@ def main():
                 ):
                     st.session_state.recognition_active = True
                     st.success("Recognition started!")
+                    st.rerun()  # Immediately trigger auto-refresh
             with col_stop:
                 if st.button("⏹️ Stop Recognition", key="stop_recognition"):
                     st.session_state.recognition_active = False
@@ -906,7 +907,16 @@ def main():
                         if show_history:
                             with history_ph:
                                 hist_fig = go.Figure()
-                                t = list(st.session_state.rt_times)
+                                # Convert timestamps to relative time (seconds from start)
+                                start_time = (
+                                    st.session_state.rt_times[0]
+                                    if st.session_state.rt_times
+                                    else 0
+                                )
+                                t = [
+                                    (ts - start_time)
+                                    for ts in st.session_state.rt_times
+                                ]
                                 for e in EMOTION_LABELS:
                                     hist_fig.add_scatter(
                                         x=t,
@@ -918,6 +928,7 @@ def main():
                                     height=280,
                                     margin=dict(l=0, r=0, t=20, b=20),
                                     legend=dict(orientation="h"),
+                                    xaxis=dict(title="Time (seconds)"),
                                     yaxis=dict(tickformat=".3f", title="Probability"),
                                 )
                                 st.plotly_chart(
