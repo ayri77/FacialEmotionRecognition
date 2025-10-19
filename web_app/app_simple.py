@@ -105,12 +105,24 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.current_emotion = None
         self.current_confidence = None
         self.current_scores = None
+        self.last_scores = None  # Keep last good scores
 
         # Threading for data synchronization
         self._lock = threading.Lock()
         self.ready = threading.Event()
         if self.model_loaded:
             self.ready.set()
+
+        # Caching for stable overlay rendering
+        self.last_bbox = None  # (x,y,w,h)
+        self.last_text = None  # "emotion: 95.1%"
+        self.hold_ms = 2000  # hold last overlay for 2.0s
+        self.last_seen = 0.0
+        self.hold_s = 0.8  # Hold scores for 0.8 seconds
+
+        # Debug logging throttling
+        self._last_log_ts = 0.0
+        self.model_id = id(self.model)
 
     def load_model_once(self):
         """Load model if not already loaded"""
@@ -143,18 +155,6 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                 print(f"DEBUG: Error starting model load: {e}")
                 return False
         return self.model_loaded
-
-        # Caching for stable overlay rendering
-        self.last_bbox = None  # (x,y,w,h)
-        self.last_text = None  # "emotion: 95.1%"
-        self.hold_ms = 2000  # hold last overlay for 2.0s
-        self.last_seen = 0.0
-        self.last_scores = None  # Keep last good scores
-        self.hold_s = 0.8  # Hold scores for 0.8 seconds
-
-        # Debug logging throttling
-        self._last_log_ts = 0.0
-        self.model_id = id(self.model)
 
     def preprocess_face(self, face, target_size):
         face_resized = cv2.resize(face, target_size)
@@ -244,7 +244,11 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                 # Never clear results immediately. Hold last valid values, clear only if face missing for long time (>2.5s)
                 age = now - self.last_seen  # сколько времени мы не видели лицо
                 with self._lock:
-                    if self.last_scores is not None and age < max(self.hold_s, 2.5):
+                    if (
+                        hasattr(self, "last_scores")
+                        and self.last_scores is not None
+                        and age < max(self.hold_s, 2.5)
+                    ):
                         # держим последние валидные результаты
                         self.current_scores = self.last_scores
                         k = int(np.argmax(self.current_scores))
@@ -259,7 +263,7 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                 # Debug logging for no face case
                 if (time.time() - self._last_log_ts) > 1.0:
                     print(
-                        f"[PROC] no_face age={time.time()-self.last_seen:.2f}s last_scores={self.last_scores is not None}"
+                        f"[PROC] no_face age={time.time()-self.last_seen:.2f}s last_scores={hasattr(self, 'last_scores') and self.last_scores is not None}"
                     )
                     self._last_log_ts = time.time()
                     # self.last_scores = None  # Keep for UI that updates later
@@ -273,7 +277,9 @@ def snapshot(proc):
     """Safely read processor data with lock"""
     with proc._lock:
         scores = (
-            proc.current_scores if proc.current_scores is not None else proc.last_scores
+            proc.current_scores
+            if proc.current_scores is not None
+            else (proc.last_scores if hasattr(proc, "last_scores") else None)
         )
         return {
             "ready": proc.ready.is_set(),
