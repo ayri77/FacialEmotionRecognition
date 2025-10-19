@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
+import tensorflow as tf
 from PIL import Image
 from streamlit_autorefresh import st_autorefresh
 from streamlit_webrtc import (
@@ -30,6 +31,12 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 warnings.filterwarnings("ignore")
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
+
+# Hugging Face model URL
+HF_MODEL_URL = (
+    "https://huggingface.co/ayri77/facial-emotion-cnn/resolve/main/"
+    "converted_best_hpo_optimized.keras?download=true"
+)
 
 EMOTION_LABELS = ["happy", "neutral", "sad", "surprise"]
 EMOTION_COLORS = {
@@ -48,44 +55,33 @@ if "debug_mode" not in st.session_state:
     st.session_state.debug_mode = True
 
 
-def ensure_model_available():
-    """Ensure model is available, download if needed (lazy loading)"""
-    # Check if model is already downloaded
-    possible_paths = [
-        "models/converted_best_hpo_optimized.keras",  # Local development
-        "converted_best_hpo_optimized.keras",  # Streamlit Cloud root
-        os.path.join(
-            os.getcwd(), "converted_best_hpo_optimized.keras"
-        ),  # Absolute path
-    ]
+@st.cache_resource(show_spinner=True)
+def fetch_model_path() -> str:
+    """
+    Скачивает .keras с Hugging Face и возвращает локальный путь.
+    Файл кэшируется в ./models, повторно не качается.
+    """
+    path = tf.keras.utils.get_file(
+        fname="converted_best_hpo_optimized.keras",
+        origin=HF_MODEL_URL,
+        cache_dir=".",  # текущая папка проекта
+        cache_subdir="models",  # ./models/converted_best_hpo_optimized.keras
+        extract=False,
+    )
+    return path
 
-    print(f"DEBUG: Checking for model in paths: {possible_paths}")
-    print(f"DEBUG: Current working directory: {os.getcwd()}")
 
-    for path in possible_paths:
-        if os.path.exists(path):
-            size = os.path.getsize(path)
-            print(f"DEBUG: Found model at {path}, size: {size} bytes")
-            if size > 0:
-                return path
-            else:
-                print(f"DEBUG: Model file {path} is empty, removing...")
-                os.remove(path)
-
-    # Model not found, download it
-    print("DEBUG: Model not found locally, downloading from Hugging Face...")
+def ensure_model_available() -> str | None:
     try:
-        if download_model_from_huggingface():
-            # Try to find the downloaded model
-            for path in possible_paths:
-                if os.path.exists(path) and os.path.getsize(path) > 0:
-                    print(f"DEBUG: Successfully downloaded model to {path}")
-                    return path
+        path = fetch_model_path()
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            print(f"DEBUG: model ready at {path}, size={os.path.getsize(path)}")
+            return path
+        print("DEBUG: model path exists but empty")
+        return None
     except Exception as e:
-        print(f"DEBUG: Error downloading model: {e}")
-
-    print("DEBUG: Failed to ensure model availability")
-    return None
+        print(f"DEBUG: fetch_model_path failed: {e}")
+        return None
 
 
 def get_model_once(model_path):
@@ -331,104 +327,6 @@ def is_recent(s, window=1.0):
     return (a is not None) and (a <= window)
 
 
-def download_model_from_huggingface():
-    """Download the best model from Hugging Face"""
-    import requests
-
-    # Use absolute path for Streamlit Cloud
-    model_path = os.path.join(os.getcwd(), "converted_best_hpo_optimized.keras")
-    huggingface_url = "https://huggingface.co/ayri77/facial-emotion-cnn/resolve/main/converted_best_hpo_optimized.keras"
-
-    try:
-        # Download the model
-        print(
-            "DEBUG: Downloading the best emotion recognition model (79.2% accuracy) from Hugging Face..."
-        )
-        print(f"DEBUG: Download URL: {huggingface_url}")
-        print(f"DEBUG: Target path: {model_path}")
-
-        response = requests.get(huggingface_url, stream=True, timeout=60)
-        print(f"DEBUG: Response status: {response.status_code}")
-        print(f"DEBUG: Response headers: {dict(response.headers)}")
-
-        response.raise_for_status()
-
-        # Save the model to current directory
-        total_size = 0
-        with open(model_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    total_size += len(chunk)
-
-        print(f"DEBUG: Model downloaded successfully! Size: {total_size} bytes")
-
-        # Verify the file was created and has content
-        if os.path.exists(model_path):
-            actual_size = os.path.getsize(model_path)
-            print(f"DEBUG: File exists, actual size: {actual_size} bytes")
-            if actual_size > 0:
-                return True
-            else:
-                print("DEBUG: Downloaded file is empty!")
-                return False
-        else:
-            print("DEBUG: Downloaded file does not exist!")
-            return False
-
-    except Exception as e:
-        print(f"DEBUG: Failed to download model: {str(e)}")
-        print(f"DEBUG: Exception type: {type(e).__name__}")
-        return False
-
-
-@st.cache_resource
-def load_emotion_model():
-    """Load the best trained emotion recognition model (79.2% accuracy)"""
-    try:
-        # Try different possible paths for the model
-        possible_paths = [
-            "models/converted_best_hpo_optimized.keras",  # Local development
-            "converted_best_hpo_optimized.keras",  # Streamlit Cloud root
-            os.path.join(
-                os.getcwd(), "converted_best_hpo_optimized.keras"
-            ),  # Absolute path
-        ]
-
-        model_path = None
-        for path in possible_paths:
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                model_path = path
-                print(f"DEBUG: Model found at: {path}")
-                break
-
-        if model_path:
-            return model_path
-        else:
-            # Try to download the model from Hugging Face
-            if download_model_from_huggingface():
-                # Try to find the downloaded model
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        try:
-                            test_model = load_model(path, compile=False)
-                            if test_model is not None:
-                                print(f"DEBUG: Downloaded model loaded at: {path}")
-                                return path
-                        except Exception as e:
-                            print(f"Downloaded model at {path} failed to load: {e}")
-                            continue
-                st.error("Model downloaded but failed to load!")
-                return None
-            else:
-                st.error("Best model not found and download failed!")
-                return None
-
-    except Exception as e:
-        st.error(f"❌ Error loading emotion model: {str(e)}")
-        return None
-
-
 @st.cache_resource
 def get_cached_model(model_path):
     """Cache the loaded model to avoid multiple loads"""
@@ -558,6 +456,15 @@ def main():
             "🔧 Debug mode", value=st.session_state.debug_mode, key="debug_mode_fixed"
         )
         st.session_state.debug_mode = debug_mode
+
+        # Model diagnostic button
+        if st.button("🧪 Check model file"):
+            p = ensure_model_available()
+            if p:
+                st.success(f"Model: {p} ({os.path.getsize(p)} bytes)")
+            else:
+                st.error("Model not available.")
+
         st.markdown("---")
 
     # Sidebar with all controls
@@ -699,38 +606,14 @@ def main():
                     with st.spinner("Loading model..."):
                         model_path = ensure_model_available()
                         if model_path is None:
-                            st.error("❌ Failed to load emotion recognition model!")
-                            st.error("**Debug Information:**")
-                            st.code(
-                                f"""
-Current directory: {os.getcwd()}
-Model paths checked:
-- models/converted_best_hpo_optimized.keras
-- converted_best_hpo_optimized.keras
-- {os.path.join(os.getcwd(), 'converted_best_hpo_optimized.keras')}
-
-Please check the console logs for detailed error information.
-                            """
-                            )
-                            st.info(
-                                "Please try again or switch to Model Analysis mode."
+                            st.error(
+                                "❌ Failed to load emotion recognition model from Hugging Face."
                             )
                             st.stop()
 
-                # Load model object for WebRTC processor
                 model_obj = get_model_once(model_path)
                 if model_obj is None:
                     st.error("❌ Failed to load model object!")
-                    st.error("**Debug Information:**")
-                    st.code(
-                        f"""
-Model path: {model_path}
-Model exists: {os.path.exists(model_path) if model_path else False}
-Model size: {os.path.getsize(model_path) if model_path and os.path.exists(model_path) else 'N/A'} bytes
-
-Please check the console logs for detailed error information.
-                    """
-                    )
                     st.stop()
 
                 # WebRTC Configuration with TURN server for NAT traversal
