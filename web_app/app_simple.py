@@ -38,14 +38,29 @@ EMOTION_COLORS = {
     "surprise": "#FF6347",
 }
 
+# Global model cache for WebRTC processor
+_MODEL = None
+_MODEL_PATH = None
+
+
+def get_model_once(model_path):
+    """Simple thread-safe model cache without Streamlit dependencies"""
+    global _MODEL, _MODEL_PATH
+    if _MODEL is None or _MODEL_PATH != model_path:
+        _MODEL = load_model(model_path, compile=False)
+        _MODEL_PATH = model_path
+    return _MODEL
+
 
 class WebRTCEmotionProcessor(VideoProcessorBase):
     """WebRTC processor for real-time emotion detection"""
 
-    def __init__(self, model_path):
-        self.model_path = model_path
-        self.model = None
-        self.face_cascade = None
+    def __init__(self, model):
+        self.model = model
+        self.model_loaded = self.model is not None
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
         self.emotion_labels = EMOTION_LABELS
         self.model_input_size = (48, 48)
         self.recent_predictions = deque(maxlen=5)
@@ -54,11 +69,12 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.current_emotion = None
         self.current_confidence = None
         self.current_scores = None
-        self.model_loaded = False
 
         # Threading for data synchronization
         self._lock = threading.Lock()
         self.ready = threading.Event()
+        if self.model_loaded:
+            self.ready.set()
 
         # Caching for stable overlay rendering
         self.last_bbox = None  # (x,y,w,h)
@@ -67,22 +83,6 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.last_seen = 0.0
         self.last_scores = None  # Keep last good scores
         self.hold_s = 0.8  # Hold scores for 0.8 seconds
-
-    def load_model_once(self):
-        if self.model_loaded:
-            return True
-        model = get_cached_model(self.model_path)
-        if model is None:
-            return False
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-        with self._lock:
-            self.model = model
-            self.face_cascade = face_cascade
-            self.model_loaded = True
-            self.ready.set()
-        return True
 
     def preprocess_face(self, face, target_size):
         face_resized = cv2.resize(face, target_size)
@@ -116,7 +116,7 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                 )
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        if not self.load_model_once():
+        if not self.model_loaded:
             return frame
         img = frame.to_ndarray(format="bgr24")
 
@@ -223,17 +223,10 @@ def load_emotion_model():
 
         model_path = None
         for path in possible_paths:
-            if os.path.exists(path):
-                # Test if model can be loaded
-                try:
-                    test_model = load_model(path, compile=False)
-                    if test_model is not None:
-                        model_path = path
-                        print(f"DEBUG: Model found and loaded at: {path}")
-                        break
-                except Exception as e:
-                    print(f"Model at {path} failed to load: {e}")
-                    continue
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                model_path = path
+                print(f"DEBUG: Model found at: {path}")
+                break
 
         if model_path:
             return model_path
@@ -363,6 +356,9 @@ def main():
             st.rerun()
 
         st.stop()
+
+    # Load model object for WebRTC processor
+    model_obj = get_model_once(model_path)
 
     # Initialize session state
     if "emotion_history" not in st.session_state:
@@ -550,7 +546,7 @@ def main():
                 webrtc_ctx = webrtc_streamer(
                     key="emotion-detection",  # Fixed key for stability
                     mode=WebRtcMode.SENDRECV,
-                    video_processor_factory=lambda: WebRTCEmotionProcessor(model_path),
+                    video_processor_factory=lambda: WebRTCEmotionProcessor(model_obj),
                     rtc_configuration=rtc_configuration,
                     media_stream_constraints={
                         "video": {
@@ -638,11 +634,11 @@ def main():
 
                 if processor is None:
                     results_ph.info("🔄 Connecting WebRTC…")
+                elif not processor.model_loaded:
+                    results_ph.info("⏳ Loading model…")
                 else:
                     s = snapshot(processor)
-                    if not s["ready"]:
-                        results_ph.info("⏳ Loading model…")
-                    elif s["scores"] is not None:
+                    if s["scores"] is not None:
                         now = time.time()
                         # Update main result display (throttled)
                         if now - last_ui > 0.3:
