@@ -480,23 +480,6 @@ def main():
     show_confidence_bars = st.session_state.show_confidence_bars
     show_history = st.session_state.show_history
 
-    # Auto-refresh UI only when WebRTC is actually playing
-    active_ctx = st.session_state.get("webrtc_ctx")
-    is_playing = bool(active_ctx and active_ctx.state.playing)
-
-    need_auto_refresh = (
-        video_mode == "WebRTC (Real-time)"
-        and st.session_state.get("video_running", False)
-        and is_playing
-    )
-
-    if need_auto_refresh:
-        now = time.time()
-        interval = float(update_frequency)  # seconds
-        if now - st.session_state.get("last_refresh", 0.0) >= max(0.3, interval):
-            st.session_state["last_refresh"] = now
-            st.rerun()
-
     # Initialize real-time history tracking
     if "rt_times" not in st.session_state:
         st.session_state.rt_times = deque(maxlen=300)  # ~5 minutes at 1 Hz
@@ -546,7 +529,7 @@ def main():
                     video_processor_factory=lambda: WebRTCEmotionProcessor(model_path),
                     rtc_configuration=rtc_configuration,
                     media_stream_constraints={"video": True, "audio": False},
-                    async_processing=True,
+                    async_processing=False,  # Temporarily disabled for debugging
                     desired_playing_state=st.session_state.video_running,
                     video_html_attrs={
                         "controls": True,
@@ -559,6 +542,22 @@ def main():
                     },
                 )
                 st.session_state.webrtc_ctx = webrtc_ctx
+
+                # Auto-refresh UI only when WebRTC is actually playing
+                is_playing = bool(webrtc_ctx and webrtc_ctx.state.playing)
+                need_auto_refresh = (
+                    video_mode == "WebRTC (Real-time)"
+                    and st.session_state.get("video_running", False)
+                    and is_playing
+                )
+                if need_auto_refresh:
+                    now = time.time()
+                    interval = float(update_frequency)  # seconds
+                    if now - st.session_state.get("last_refresh", 0.0) >= max(
+                        0.3, interval
+                    ):
+                        st.session_state["last_refresh"] = now
+                        st.rerun()
 
                 # Status updates through fixed placeholder
                 if webrtc_ctx.state.playing and webrtc_ctx.video_processor:
@@ -640,8 +639,9 @@ def main():
                 processor = getattr(active_ctx, "video_processor", None)
 
                 if processor is not None:
-                    # Current bars (every ~0.5s)
-                    if show_confidence_bars and processor.current_scores is not None:
+                    # Current bars (every ~0.5s) - use current_scores or fallback to last_scores
+                    scores = processor.current_scores or processor.last_scores
+                    if show_confidence_bars and scores is not None:
                         if (
                             time.time() - st.session_state.get("last_bars_ts", 0.0)
                             > 0.5
@@ -652,10 +652,7 @@ def main():
                                     [
                                         go.Bar(
                                             x=EMOTION_LABELS,
-                                            y=[
-                                                float(s)
-                                                for s in processor.current_scores
-                                            ],
+                                            y=[float(s) for s in scores],
                                         )
                                     ]
                                 )
@@ -670,16 +667,19 @@ def main():
                                     config={"displayModeBar": False},
                                 )
 
-                    # History (every ~1s)
+                    # History (every ~1s) - use current_scores or fallback to last_scores
+                    scores_for_history = (
+                        processor.current_scores or processor.last_scores
+                    )
                     if (
-                        processor.current_scores is not None
+                        scores_for_history is not None
                         and time.time() - st.session_state.last_hist_ts > 1.0
                     ):
                         st.session_state.last_hist_ts = time.time()
                         st.session_state.rt_times.append(st.session_state.last_hist_ts)
                         for i, e in enumerate(EMOTION_LABELS):
                             st.session_state.rt_hist[e].append(
-                                float(processor.current_scores[i])
+                                float(scores_for_history[i])
                             )
 
                         if show_history:

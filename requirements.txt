@@ -1,7 +1,7 @@
 streamlit==1.39.*
 streamlit-webrtc==0.47.*
 aiortc==1.6.*
-av==12.*
+av>=9.0.0,<12.0.0
 opencv-python-headless==4.10.*
 tensorflow>=2.15.0
 numpy>=1.24.0
