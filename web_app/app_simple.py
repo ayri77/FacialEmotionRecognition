@@ -1,6 +1,6 @@
 """
-Simple Facial Emotion Recognition App
-This version avoids caching issues and focuses on functionality
+Facial Emotion Recognition App with WebRTC
+Full-featured real-time emotion detection using streamlit-webrtc
 """
 
 import logging
@@ -9,20 +9,24 @@ import time
 import warnings
 from collections import deque
 
+import av
 import cv2
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
+from streamlit_webrtc import (
+    RTCConfiguration,
+    VideoProcessorBase,
+    WebRtcMode,
+    webrtc_streamer,
+)
 from tensorflow.keras.models import load_model
 
-# Suppress TensorFlow warnings
+# Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-
 warnings.filterwarnings("ignore")
-
-# Suppress TensorFlow deprecation warnings
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 EMOTION_LABELS = ["happy", "neutral", "sad", "surprise"]
@@ -34,150 +38,121 @@ EMOTION_COLORS = {
 }
 
 
-class EmotionRecognizer:
-    def __init__(self, model_path="models/converted_best_hpo_optimized.keras"):
+class WebRTCEmotionProcessor(VideoProcessorBase):
+    """WebRTC processor for real-time emotion detection"""
+
+    def __init__(self, model_path):
+        self.model_path = model_path
         self.model = None
         self.face_cascade = None
-        self.model_input_size = (48, 48)
         self.emotion_labels = EMOTION_LABELS
-        self.emotion_colors = EMOTION_COLORS
+        self.model_input_size = (48, 48)
+        self.recent_predictions = deque(maxlen=5)
+        self.last_update = 0.0
+        self.update_interval = 0.5  # Increased for more stable detection
+        self.current_emotion = None
+        self.current_confidence = None
+        self.current_scores = None
+        self.model_loaded = False
 
-        # Load model and cascade
-        self._load_model(model_path)
-        self._load_face_cascade()
+        # Caching for stable overlay rendering
+        self.last_bbox = None  # (x,y,w,h)
+        self.last_text = None  # "emotion: 95.1%"
+        self.hold_ms = 2000  # hold last overlay for 2.0s
+        self.last_seen = 0.0
+        self.last_scores = None  # Keep last good scores
+        self.hold_s = 0.8  # Hold scores for 0.8 seconds
 
-        # Hide model info message - show only if needed
-        # if self.model:
-        #     st.info(f"📊 Model info: {self.model.count_params():,} parameters, Input: {self.model.input_shape}")
-
-    def _load_model(self, model_path):
-        try:
-            if os.path.exists(model_path):
-                self.model = load_model(model_path)
-                # Hide success message - model is loaded silently
-                if self.model.input_shape:
-                    self.model_input_size = self.model.input_shape[1:3]
-            else:
-                st.error(f"❌ Model file not found: {model_path}")
-        except Exception as e:
-            st.error(f"❌ Error loading model: {str(e)}")
-
-    def _load_face_cascade(self):
-        try:
-            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            self.face_cascade = cv2.CascadeClassifier(cascade_path)
-            if self.face_cascade.empty():
-                st.error("❌ Could not load Haar cascade classifier.")
-        except Exception as e:
-            st.error(f"❌ Error loading face cascade: {str(e)}")
-
-    def preprocess_face(self, face_roi, target_size=(48, 48)):
-        """Preprocess face region for emotion prediction"""
-        try:
-            face_resized = cv2.resize(face_roi, target_size)
-            face_rgb = cv2.cvtColor(face_resized, cv2.COLOR_BGR2RGB)
-            face_normalized = face_rgb / 255.0
-            return np.expand_dims(face_normalized, axis=0)
-        except Exception as e:
-            st.error(f"Error preprocessing face: {e}")
-            return None
-
-    def process_frame(self, frame):
-        """Detect faces, predict emotions, and draw on frame"""
-        print(f"DEBUG: process_frame called, model is None: {self.model is None}")
-
+    def load_model_once(self):
+        if self.model_loaded:
+            return True
+        self.model = get_cached_model(self.model_path)
         if self.model is None:
-            print("DEBUG: Model is None, returning None")
-            return frame, None, None
+            return False
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        self.model_loaded = True
+        return True
 
-        print(f"DEBUG: Frame shape: {frame.shape}")
-        print(f"DEBUG: Face cascade is None: {self.face_cascade is None}")
-
-        # Try face detection first
-        if self.face_cascade is not None:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(gray, 1.1, 4)
-            print(f"DEBUG: Found {len(faces)} faces")
-
-            if len(faces) > 0:
-                largest_face = max(faces, key=lambda x: x[2] * x[3])
-                x, y, w, h = largest_face
-                face_roi = frame[y : y + h, x : x + w]
-                print(f"DEBUG: Face ROI shape: {face_roi.shape}")
-
-                processed_face = self.preprocess_face(face_roi, self.model_input_size)
-                if processed_face is not None:
-                    print(f"DEBUG: Processed face shape: {processed_face.shape}")
-                    predictions = self.model.predict(processed_face, verbose=0)[0]
-                    confidence_scores = predictions * 100
-                    print(f"DEBUG: Predictions: {predictions}")
-                    print(f"DEBUG: Confidence scores: {confidence_scores}")
-
-                    best_emotion_idx = np.argmax(confidence_scores)
-                    best_emotion = self.emotion_labels[best_emotion_idx]
-                    best_confidence = confidence_scores[best_emotion_idx]
-                    print(
-                        f"DEBUG: Best emotion: {best_emotion} ({best_confidence:.1f}%)"
-                    )
-
-                    # Draw rectangle and text
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                    cv2.putText(
-                        frame,
-                        f"{best_emotion}: {best_confidence:.1f}%",
-                        (x, y - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 255, 0),
-                        2,
-                    )
-                    return frame, best_emotion, confidence_scores
-                else:
-                    print("DEBUG: Failed to preprocess face")
-            else:
-                print("DEBUG: No faces detected")
-
-        # Fallback: if no face detected or face detection failed,
-        # try to process the entire frame (useful for 48x48 images)
-        print(f"DEBUG: Trying fallback, frame shape: {frame.shape}")
-        if frame.shape[:2] == (48, 48) or (
-            len(frame.shape) == 3 and frame.shape[:2] == (48, 48)
-        ):
-            print("DEBUG: Frame is 48x48, processing as face image")
-            # This might be a 48x48 face image
-            processed_face = self.preprocess_face(frame, self.model_input_size)
-            if processed_face is not None:
-                print(f"DEBUG: Fallback processed face shape: {processed_face.shape}")
-                predictions = self.model.predict(processed_face, verbose=0)[0]
-                confidence_scores = predictions * 100
-                print(f"DEBUG: Fallback predictions: {predictions}")
-                print(f"DEBUG: Fallback confidence scores: {confidence_scores}")
-
-                best_emotion_idx = np.argmax(confidence_scores)
-                best_emotion = self.emotion_labels[best_emotion_idx]
-                best_confidence = confidence_scores[best_emotion_idx]
-                print(
-                    f"DEBUG: Fallback best emotion: {best_emotion} ({best_confidence:.1f}%)"
-                )
-
-                # Draw text on frame
-                cv2.putText(
-                    frame,
-                    f"{best_emotion}: {best_confidence:.1f}%",
-                    (5, 15),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    1,
-                )
-                return frame, best_emotion, confidence_scores
-            else:
-                print("DEBUG: Fallback preprocessing failed")
+    def preprocess_face(self, face, target_size):
+        face_resized = cv2.resize(face, target_size)
+        if len(face_resized.shape) == 3:
+            face_rgb = cv2.cvtColor(face_resized, cv2.COLOR_BGR2RGB)
         else:
-            print(f"DEBUG: Frame is not 48x48, shape: {frame.shape}")
+            face_rgb = cv2.cvtColor(face_resized, cv2.COLOR_GRAY2RGB)
+        face_norm = face_rgb.astype(np.float32) / 255.0
+        return np.expand_dims(face_norm, axis=0)
 
-        print("DEBUG: No processing possible, returning None")
-        return frame, None, None
+    def smooth_predictions(self, new_prediction):
+        self.recent_predictions.append(new_prediction)
+        if len(self.recent_predictions) < 3:
+            return new_prediction
+        return np.mean(list(self.recent_predictions), axis=0)
+
+    def _draw_overlay(self, img):
+        """Draw cached overlay on every frame to prevent flickering"""
+        if self.last_bbox and (time.time() - self.last_seen) * 1000 < self.hold_ms:
+            x, y, w, h = self.last_bbox
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            if self.last_text:
+                cv2.putText(
+                    img,
+                    self.last_text,
+                    (x, y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        if not self.load_model_once():
+            return frame
+        img = frame.to_ndarray(format="bgr24")
+
+        now = time.time()
+        if now - self.last_update >= self.update_interval:
+            self.last_update = now
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            faces = self.face_cascade.detectMultiScale(
+                gray, 1.1, 3
+            )  # Reduced minNeighbors for more stable detection
+            if len(faces) > 0:
+                x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
+                roi = img[y : y + h, x : x + w]
+                sample = self.preprocess_face(roi, self.model_input_size)
+                preds = self.model.predict(sample, verbose=0)[0] * 100
+                scores = self.smooth_predictions(preds)
+                k = int(np.argmax(scores))
+                self.current_emotion = self.emotion_labels[k]
+                self.current_confidence = float(scores[k])
+                self.current_scores = scores
+                self.last_scores = scores  # Remember last good scores
+                self.last_bbox = (x, y, w, h)
+                self.last_text = (
+                    f"{self.current_emotion}: {self.current_confidence:.1f}%"
+                )
+                self.last_seen = now
+            else:
+                # If recently had face - don't reset, show previous
+                if self.last_scores is not None and (now - self.last_seen) < max(
+                    self.hold_s, self.update_interval * 2
+                ):
+                    self.current_scores = self.last_scores
+                    k = int(np.argmax(self.current_scores))
+                    self.current_emotion = self.emotion_labels[k]
+                    self.current_confidence = float(self.current_scores[k])
+                else:
+                    self.current_emotion = None
+                    self.current_confidence = None
+                    self.current_scores = None
+                    # Don't clear last_scores immediately - let UI catch up
+                    # self.last_scores = None  # Keep for UI that updates later
+
+        # Draw last known overlay on EVERY frame
+        self._draw_overlay(img)
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 def download_model_from_dropbox():
@@ -223,21 +198,34 @@ def load_emotion_model():
         model_path = None
         for path in possible_paths:
             if os.path.exists(path):
-                model_path = path
-                break
+                # Test if model can be loaded
+                try:
+                    test_model = load_model(path, compile=False)
+                    if test_model is not None:
+                        model_path = path
+                        print(f"DEBUG: Model found and loaded at: {path}")
+                        break
+                except Exception as e:
+                    print(f"Model at {path} failed to load: {e}")
+                    continue
 
         if model_path:
-            recognizer = EmotionRecognizer(model_path)
-            return recognizer
+            return model_path
         else:
             # Try to download the model from Dropbox
             if download_model_from_dropbox():
                 # Try to find the downloaded model
                 for path in possible_paths:
                     if os.path.exists(path):
-                        recognizer = EmotionRecognizer(path)
-                        return recognizer
-                st.error("Model downloaded but not found!")
+                        try:
+                            test_model = load_model(path, compile=False)
+                            if test_model is not None:
+                                print(f"DEBUG: Downloaded model loaded at: {path}")
+                                return path
+                        except Exception as e:
+                            print(f"Downloaded model at {path} failed to load: {e}")
+                            continue
+                st.error("Model downloaded but failed to load!")
                 return None
             else:
                 st.error("Best model not found and download failed!")
@@ -245,6 +233,18 @@ def load_emotion_model():
 
     except Exception as e:
         st.error(f"❌ Error loading emotion model: {str(e)}")
+        return None
+
+
+@st.cache_resource
+def get_cached_model(model_path):
+    """Cache the loaded model to avoid multiple loads"""
+    try:
+        print(f"DEBUG: Caching model from: {model_path}")
+        model = load_model(model_path, compile=False)
+        return model
+    except Exception as e:
+        print(f"Error caching model: {e}")
         return None
 
 
@@ -315,8 +315,8 @@ def main():
     st.markdown("#### Real-time Emotion Detection")
 
     # Load model (hide loading messages)
-    recognizer = load_emotion_model()
-    if recognizer is None:
+    model_path = load_emotion_model()
+    if model_path is None:
         st.error("❌ Failed to load or create emotion recognition model!")
         st.markdown(
             """
@@ -334,7 +334,7 @@ def main():
         if st.button("← Back to Main Menu"):
             st.session_state.app_mode = "Model Analysis"
             # Force page refresh to avoid recursion
-            st.experimental_rerun()
+            st.rerun()
 
         st.stop()
 
@@ -344,17 +344,20 @@ def main():
             emotion: deque(maxlen=50) for emotion in EMOTION_LABELS
         }
 
+    if "video_running" not in st.session_state:
+        st.session_state.video_running = False
+
     if "confidence_threshold" not in st.session_state:
         st.session_state.confidence_threshold = 50
+
+    if "update_frequency" not in st.session_state:
+        st.session_state.update_frequency = 1.0
 
     if "show_confidence_bars" not in st.session_state:
         st.session_state.show_confidence_bars = True
 
     if "show_history" not in st.session_state:
         st.session_state.show_history = True
-
-    if "video_running" not in st.session_state:
-        st.session_state.video_running = False
 
     # Add smoothing for results
     if "recent_predictions" not in st.session_state:
@@ -363,52 +366,65 @@ def main():
     if "last_update_time" not in st.session_state:
         st.session_state.last_update_time = 0
 
-    if "update_frequency" not in st.session_state:
-        st.session_state.update_frequency = 1.0  # seconds
-
     # Sidebar with all controls
     with st.sidebar:
-        # Video controls at the top
-        st.markdown("**Video Controls**")
+        # Video mode selection
+        video_mode = st.radio(
+            "Video Mode",
+            ["WebRTC (Real-time)", "Camera Input (Photo)"],
+            key="video_mode",
+        )
 
+        # Clear state when switching modes
+        if "last_video_mode" not in st.session_state:
+            st.session_state.last_video_mode = video_mode
+        elif st.session_state.last_video_mode != video_mode:
+            # Mode changed - clear all state
+            st.session_state.video_running = False
+            st.session_state.current_emotion = None
+            st.session_state.current_confidence = None
+            st.session_state.current_scores = None
+            if "recent_predictions" in st.session_state:
+                st.session_state.recent_predictions.clear()
+            # Clear real-time history when switching modes
+            if "rt_times" in st.session_state:
+                st.session_state.rt_times.clear()
+            if "rt_hist" in st.session_state:
+                for emotion in st.session_state.rt_hist:
+                    st.session_state.rt_hist[emotion].clear()
+            st.session_state.last_video_mode = video_mode
+            # Force rerun to clear UI
+            st.rerun()
+
+        # Video controls
+        st.markdown("**Video Controls**")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Start", key="start_video"):
-                st.session_state.video_running = True
-                # Avoid rerun to prevent recursion - just update session state
-                pass
-
+            start = st.button("Start", key="start_video")
         with col2:
-            if st.button("Stop", key="stop_video"):
-                # Safely clear video state
-                try:
-                    st.session_state.video_running = False
-                    # Safely clear recent predictions to avoid pop() errors
-                    if (
-                        "recent_predictions" in st.session_state
-                        and st.session_state.recent_predictions is not None
-                    ):
-                        # Convert to list and clear safely
-                        try:
-                            list(st.session_state.recent_predictions)
-                            st.session_state.recent_predictions.clear()
-                        except Exception:
-                            # If deque is corrupted, reinitialize it
-                            st.session_state.recent_predictions = deque(maxlen=5)
-                    else:
-                        # Initialize if doesn't exist
+            stop = st.button("Stop", key="stop_video")
+
+        if start:
+            st.session_state.video_running = True
+        if stop:
+            st.session_state.video_running = False
+            # Safely clear recent predictions
+            if "recent_predictions" in st.session_state:
+                if st.session_state.recent_predictions is not None:
+                    try:
+                        st.session_state.recent_predictions.clear()
+                    except Exception:
                         st.session_state.recent_predictions = deque(maxlen=5)
-                    # Avoid rerun to prevent recursion - just update session state
-                    pass
-                except Exception as e:
-                    st.error(f"Error stopping video: {e}")
-                    st.session_state.video_running = False
-                    # Avoid rerun to prevent recursion - just update session state
-                    pass
+                else:
+                    st.session_state.recent_predictions = deque(maxlen=5)
+
+        # Auto-stop video when switching to photo mode
+        if video_mode == "Camera Input (Photo)" and st.session_state.video_running:
+            st.session_state.video_running = False
 
         st.markdown("---")
 
-        # Settings below video controls
+        # Settings
         st.header("Controls")
 
         with st.form("settings_form"):
@@ -426,7 +442,7 @@ def main():
                 "Update Frequency (seconds)",
                 min_value=0.1,
                 max_value=5.0,
-                value=st.session_state.update_frequency,
+                value=float(st.session_state.update_frequency),
                 step=0.1,
                 help="How often to update results display",
             )
@@ -464,198 +480,307 @@ def main():
     show_confidence_bars = st.session_state.show_confidence_bars
     show_history = st.session_state.show_history
 
-    # Video processing
+    # Auto-refresh UI only when WebRTC is actually playing
+    active_ctx = st.session_state.get("webrtc_ctx")
+    is_playing = bool(active_ctx and active_ctx.state.playing)
+
+    need_auto_refresh = (
+        video_mode == "WebRTC (Real-time)"
+        and st.session_state.get("video_running", False)
+        and is_playing
+    )
+
+    if need_auto_refresh:
+        now = time.time()
+        interval = float(update_frequency)  # seconds
+        if now - st.session_state.get("last_refresh", 0.0) >= max(0.3, interval):
+            st.session_state["last_refresh"] = now
+            st.rerun()
+
+    # Initialize real-time history tracking
+    if "rt_times" not in st.session_state:
+        st.session_state.rt_times = deque(maxlen=300)  # ~5 minutes at 1 Hz
+        st.session_state.rt_hist = {e: deque(maxlen=300) for e in EMOTION_LABELS}
+        st.session_state.last_hist_ts = 0.0
+
+    # Video processing with WebRTC and Camera Input options
     if st.session_state.video_running:
         # Create two-column layout once - use more width
         col_camera, col_stats = st.columns([1, 1])
 
-        with col_camera:
-            st.caption("Live video")
-            video_placeholder = st.empty()
+        # Fixed placeholders for status and video
+        status_box = col_camera.empty()
+        video_box = col_camera.container()
+
+        if video_mode == "WebRTC (Real-time)":
+            with video_box:
+                st.caption("Live video (WebRTC)")
+
+                # WebRTC Configuration with TURN server for NAT traversal
+                rtc_configuration = RTCConfiguration(
+                    {
+                        "iceServers": [
+                            {"urls": ["stun:stun.l.google.com:19302"]},
+                            # Free TURN server for demo (for production, use your own TURN server)
+                            {
+                                "urls": ["turn:relay.metered.ca:80"],
+                                "username": "free",
+                                "credential": "free",
+                            },
+                            {
+                                "urls": ["turn:relay.metered.ca:443"],
+                                "username": "free",
+                                "credential": "free",
+                            },
+                            # For production, replace with your own TURN server:
+                            # {"urls": ["turn:your.turn.server:3478"], "username": "user", "credential": "pass"}
+                        ]
+                    }
+                )
+
+                # WebRTC Streamer - recreate component with dynamic key for proper state management
+                webrtc_key = f"emotion-detection-{video_mode}-{int(st.session_state.video_running)}"
+                webrtc_ctx = webrtc_streamer(
+                    key=webrtc_key,  # Key changes when video_running changes
+                    mode=WebRtcMode.SENDRECV,
+                    video_processor_factory=lambda: WebRTCEmotionProcessor(model_path),
+                    rtc_configuration=rtc_configuration,
+                    media_stream_constraints={"video": True, "audio": False},
+                    async_processing=True,
+                    desired_playing_state=st.session_state.video_running,
+                    video_html_attrs={
+                        "controls": True,
+                        "style": {
+                            "width": "100%",
+                            "height": "auto",
+                            "maxHeight": "400px",
+                            "objectFit": "contain",
+                        },
+                    },
+                )
+                st.session_state.webrtc_ctx = webrtc_ctx
+
+                # Status updates through fixed placeholder
+                if webrtc_ctx.state.playing and webrtc_ctx.video_processor:
+                    status_box.write(
+                        "🎥 Camera access granted! Emotion detection is active."
+                    )
+                elif st.session_state.video_running:
+                    status_box.write("🔄 Connecting...")
+                else:
+                    status_box.write("▶️ Press START to begin.")
+
+        else:  # Camera Input mode - handled separately below
+            with video_box:
+                st.caption("Live video (Camera Input)")
+                st.info("📷 Switch to 'Camera Input (Photo)' mode to take photos")
 
         with col_stats:
             st.caption("Results")
-            results_placeholder = st.empty()
 
-        # Open camera
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            st.error("❌ Could not open camera. Please check if camera is available.")
-            st.info(
-                """
-            **Camera Access Issues:**
+            # Single placeholder for results with throttling
+            results_ph = st.empty()
+            history_ph = st.empty()  # placeholder for history graph
+            bars_ph = st.empty()  # placeholder for current bars
+            last_ui = st.session_state.get("last_ui", 0.0)
 
-            **On Streamlit Cloud:** Camera access is not available due to browser security restrictions in cloud environments.
+            # Clear placeholders when switching modes
+            if st.session_state.get("last_video_mode") != video_mode:
+                results_ph.empty()
+                history_ph.empty()
+                bars_ph.empty()
+                # Clear camera input when switching to WebRTC
+                if video_mode == "WebRTC (Real-time)":
+                    st.session_state.camera_photo = None
 
-            **Solutions:**
-            1. **Upload images** using the file uploader below
-            2. **Run locally** for full camera functionality
-            3. **Use Model Analysis** to view project results
+            # Check if we're in WebRTC mode and get results from processor
+            if video_mode == "WebRTC (Real-time)" and st.session_state.video_running:
+                # ВСЕГДА сначала пробуем локальный контекст из текущего запуска,
+                # и только если его нет – берём из session_state
+                active_ctx = (
+                    webrtc_ctx
+                    if "webrtc_ctx" in locals()
+                    else st.session_state.get("webrtc_ctx")
+                )
+                processor = getattr(active_ctx, "video_processor", None)
 
-            **For local testing:** Make sure your camera is connected and not used by other applications.
-            """
-            )
-            st.session_state.video_running = False
-            return
+                if processor is not None:
+                    now = time.time()
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
+                    # Update main result display (throttled)
+                    if now - last_ui > 0.3:
+                        st.session_state.last_ui = now
 
-        frame_count = 0
-        max_frames = 100  # Much lower limit to prevent infinite loops
-        start_time = time.time()
-        max_duration = 30  # Maximum 30 seconds of video processing
-
-        while (
-            st.session_state.video_running
-            and frame_count < max_frames
-            and (time.time() - start_time) < max_duration
-        ):
-            ret, frame = cap.read()
-            if not ret:
-                st.error("❌ Failed to read from camera")
-                break
-
-            frame_count += 1
-            print(f"DEBUG: Processing frame {frame_count}")
-
-            # Process frame
-            frame, best_emotion, confidence_scores = recognizer.process_frame(frame)
-
-            if best_emotion is not None and confidence_scores is not None:
-                # Add to recent predictions for smoothing (safely)
-                try:
-                    if "recent_predictions" not in st.session_state:
-                        st.session_state.recent_predictions = deque(maxlen=5)
-                    st.session_state.recent_predictions.append(confidence_scores)
-                except Exception:
-                    # If there's an error, reinitialize the deque
-                    st.session_state.recent_predictions = deque(maxlen=5)
-                    try:
-                        st.session_state.recent_predictions.append(confidence_scores)
-                    except Exception:
-                        pass  # Skip if still failing
-
-                # Update history
-                for i, emotion_label in enumerate(EMOTION_LABELS):
-                    st.session_state.emotion_history[emotion_label].append(
-                        confidence_scores[i]
-                    )
-
-            # Update results display based on user-defined frequency
-            current_time = time.time()
-            if current_time - st.session_state.last_update_time > update_frequency:
-                st.session_state.last_update_time = current_time
-
-                # Use smoothed predictions
-                try:
-                    smoothed_scores = smooth_predictions(
-                        st.session_state.recent_predictions
-                    )
-                except Exception:
-                    smoothed_scores = None
-
-                if smoothed_scores is not None:
-                    # Find best emotion from smoothed scores
-                    best_emotion_idx = np.argmax(smoothed_scores)
-                    best_emotion_smoothed = EMOTION_LABELS[best_emotion_idx]
-                    best_confidence_smoothed = smoothed_scores[best_emotion_idx]
-
-                    with results_placeholder.container():
-                        st.markdown(
-                            f"**{best_emotion_smoothed.capitalize()}** {best_confidence_smoothed:.1f}%"
-                        )
-
-                        if show_confidence_bars:
-                            confidence_fig = create_confidence_bars(smoothed_scores)
-                            st.plotly_chart(
-                                confidence_fig,
-                                use_container_width=True,
-                                config={"displayModeBar": False},
-                            )
-
-                        if show_history and any(
-                            st.session_state.emotion_history.values()
-                        ):
-                            st.markdown("**Average Emotions:**")
-                            avg_emotions = {}
-                            for emotion in EMOTION_LABELS:
-                                history = st.session_state.emotion_history[emotion]
-                                if history:
-                                    avg_emotions[emotion] = np.mean(list(history))
-                                else:
-                                    avg_emotions[emotion] = 0
-
-                            cols = st.columns(4)
-                            for i, (emotion, avg_score) in enumerate(
-                                avg_emotions.items()
-                            ):
-                                with cols[i]:
-                                    st.metric(
-                                        label=emotion.capitalize(),
-                                        value=f"{avg_score:.1f}%",
-                                        delta=None,
-                                    )
-
-                            # Show emotion history chart
-                            if any(
-                                len(history) > 1
-                                for history in st.session_state.emotion_history.values()
-                            ):
-                                st.markdown("**Emotion History:**")
-                                history_fig = go.Figure()
-
-                                for emotion in EMOTION_LABELS:
-                                    history = st.session_state.emotion_history[emotion]
-                                    if history:
-                                        history_fig.add_trace(
-                                            go.Scatter(
-                                                y=list(history),
-                                                mode="lines",
-                                                name=emotion.capitalize(),
-                                                line=dict(
-                                                    color=EMOTION_COLORS.get(
-                                                        emotion, "#808080"
-                                                    )
-                                                ),
-                                            )
-                                        )
-
-                                history_fig.update_layout(
-                                    title="",
-                                    xaxis_title="Time",
-                                    yaxis_title="Confidence (%)",
-                                    height=150,
-                                    showlegend=True,
-                                    margin=dict(l=0, r=0, t=0, b=0),
+                        if processor.current_emotion is not None:
+                            with results_ph:
+                                st.markdown(
+                                    f"### **{processor.current_emotion.capitalize()}**"
                                 )
+                                st.markdown(
+                                    f"**Confidence: {processor.current_confidence:.1f}%**"
+                                )
+                        else:
+                            results_ph.info(
+                                f"👤 No face detected. Debug: Model loaded: {processor.model_loaded}, "
+                                f"Scores: {processor.current_scores is not None}, Emotion: {processor.current_emotion}"
+                            )
+                else:
+                    # сюда попадём только пока браузер ещё подключается
+                    results_ph.info("🔄 Connecting WebRTC…")
 
+            # 1) Current bars (update more frequently for better responsiveness) - only when processor is available
+            if video_mode == "WebRTC (Real-time)" and st.session_state.video_running:
+                # ВСЕГДА сначала пробуем локальный контекст из текущего запуска,
+                # и только если его нет – берём из session_state
+                active_ctx = (
+                    webrtc_ctx
+                    if "webrtc_ctx" in locals()
+                    else st.session_state.get("webrtc_ctx")
+                )
+                processor = getattr(active_ctx, "video_processor", None)
+
+                if processor is not None:
+                    # Current bars (every ~0.5s)
+                    if show_confidence_bars and processor.current_scores is not None:
+                        if (
+                            time.time() - st.session_state.get("last_bars_ts", 0.0)
+                            > 0.5
+                        ):
+                            st.session_state["last_bars_ts"] = time.time()
+                            with bars_ph:
+                                fig = go.Figure(
+                                    [
+                                        go.Bar(
+                                            x=EMOTION_LABELS,
+                                            y=[
+                                                float(s)
+                                                for s in processor.current_scores
+                                            ],
+                                        )
+                                    ]
+                                )
+                                fig.update_layout(
+                                    height=180,
+                                    margin=dict(l=0, r=0, t=10, b=0),
+                                    showlegend=False,
+                                )
                                 st.plotly_chart(
-                                    history_fig,
+                                    fig,
                                     use_container_width=True,
                                     config={"displayModeBar": False},
                                 )
 
-            # Display frame
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            video_placeholder.image(frame_rgb, channels="RGB", width=600)
+                    # History (every ~1s)
+                    if (
+                        processor.current_scores is not None
+                        and time.time() - st.session_state.last_hist_ts > 1.0
+                    ):
+                        st.session_state.last_hist_ts = time.time()
+                        st.session_state.rt_times.append(st.session_state.last_hist_ts)
+                        for i, e in enumerate(EMOTION_LABELS):
+                            st.session_state.rt_hist[e].append(
+                                float(processor.current_scores[i])
+                            )
 
-            time.sleep(0.1)
+                        if show_history:
+                            with history_ph:
+                                hist_fig = go.Figure()
+                                t = list(st.session_state.rt_times)
+                                for e in EMOTION_LABELS:
+                                    hist_fig.add_scatter(
+                                        x=t,
+                                        y=list(st.session_state.rt_hist[e]),
+                                        name=e,
+                                        mode="lines",
+                                    )
+                                hist_fig.update_layout(
+                                    height=220,
+                                    margin=dict(l=0, r=0, t=10, b=0),
+                                    legend=dict(orientation="h"),
+                                )
+                                st.plotly_chart(
+                                    hist_fig,
+                                    use_container_width=True,
+                                    config={"displayModeBar": False},
+                                )
 
-        # Check if we hit any limits
-        if frame_count >= max_frames:
-            st.warning(f"⚠️ Reached maximum frame limit ({max_frames}). Stopping video.")
-            st.session_state.video_running = False
-        elif (time.time() - start_time) >= max_duration:
-            st.warning(
-                f"⚠️ Reached maximum duration limit ({max_duration}s). Stopping video."
-            )
-            st.session_state.video_running = False
+            # UI auto-refresh is handled at the top of main() function - no need for additional rerun
 
-        cap.release()
+            # Handle Camera Input mode results (regardless of video_running state)
+            if video_mode == "Camera Input (Photo)":
+                if (
+                    hasattr(st.session_state, "current_emotion")
+                    and st.session_state.current_emotion is not None
+                ):
+                    with results_ph:
+                        st.markdown(
+                            f"### **{st.session_state.current_emotion.capitalize()}**"
+                        )
+                        st.markdown(
+                            f"**Confidence: {st.session_state.current_confidence:.1f}%**"
+                        )
 
-    else:
-        # File uploader and camera input
+                        # Display all emotions
+                        if (
+                            show_confidence_bars
+                            and st.session_state.current_scores is not None
+                        ):
+                            st.markdown("**All Emotions:**")
+                            for i, emotion in enumerate(EMOTION_LABELS):
+                                score = st.session_state.current_scores[i]
+
+                                # Create progress bar
+                                progress = float(
+                                    score / 100.0
+                                )  # Convert numpy.float32 to Python float
+                                st.markdown(f"**{emotion.capitalize()}:** {score:.1f}%")
+                                st.progress(progress)
+
+                        # Update history
+                        if show_history and st.session_state.current_scores is not None:
+                            for i, emotion_label in enumerate(EMOTION_LABELS):
+                                st.session_state.emotion_history[emotion_label].append(
+                                    st.session_state.current_scores[i]
+                                )
+
+                            # Display history
+                            if any(st.session_state.emotion_history.values()):
+                                st.markdown("**Average Emotions:**")
+                                avg_emotions = {}
+                                for emotion in EMOTION_LABELS:
+                                    history = st.session_state.emotion_history[emotion]
+                                    if history:
+                                        avg_emotions[emotion] = np.mean(list(history))
+                                    else:
+                                        avg_emotions[emotion] = 0
+
+                                cols = st.columns(4)
+                                for i, (emotion, avg_score) in enumerate(
+                                    avg_emotions.items()
+                                ):
+                                    with cols[i]:
+                                        st.metric(
+                                            label=emotion.capitalize(),
+                                            value=f"{avg_score:.1f}%",
+                                            delta=None,
+                                        )
+                else:
+                    if video_mode == "WebRTC (Real-time)":
+                        if st.session_state.video_running:
+                            results_ph.info(
+                                "🎥 Video is running but no emotion detected yet. Please position your face in front of the camera."
+                            )
+                        else:
+                            results_ph.info(
+                                "🎥 Start the video stream to see emotion detection results."
+                            )
+                    else:
+                        results_ph.info(
+                            "📷 Take a photo to see emotion detection results."
+                        )
+
+    # File uploader and camera input (always available when not in WebRTC mode)
+    if video_mode == "Camera Input (Photo)":
         st.markdown("**Upload Image or Take Photo**")
 
         # Try camera input first (works on some platforms)
@@ -685,37 +810,79 @@ def main():
                 st.image(image, width=400)
 
             with col_results:
-                # Process frame
-                print("DEBUG: Converting image to frame")
-                frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-                print(f"DEBUG: Frame converted, shape: {frame.shape}")
-                print("DEBUG: Calling process_frame")
-                frame, best_emotion, confidence_scores = recognizer.process_frame(frame)
-                print(
-                    f"DEBUG: process_frame returned: emotion={best_emotion}, scores={confidence_scores is not None}"
-                )
+                # Process image using simple recognizer
+                with st.spinner("Analyzing emotion..."):
+                    try:
+                        # Convert PIL to OpenCV format
+                        frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-                if best_emotion is not None and confidence_scores is not None:
-                    st.markdown(
-                        f"**{best_emotion.capitalize()}** {confidence_scores[EMOTION_LABELS.index(best_emotion)]:.1f}%"
-                    )
-
-                    if show_confidence_bars:
-                        confidence_fig = create_confidence_bars(confidence_scores)
-                        st.plotly_chart(
-                            confidence_fig,
-                            use_container_width=True,
-                            config={"displayModeBar": False},
+                        # Try to detect face first
+                        face_cascade = cv2.CascadeClassifier(
+                            cv2.data.haarcascades
+                            + "haarcascade_frontalface_default.xml"
                         )
-                else:
-                    st.warning("No faces detected")
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+                        if len(faces) > 0:
+                            # Use largest face
+                            largest_face = max(faces, key=lambda x: x[2] * x[3])
+                            x, y, w, h = largest_face
+                            face_roi = frame[y : y + h, x : x + w]
+
+                            # Preprocess face - FIXED for RGB
+                            face_resized = cv2.resize(face_roi, (48, 48))
+                            if len(face_resized.shape) == 3:
+                                face_rgb = cv2.cvtColor(face_resized, cv2.COLOR_BGR2RGB)
+                            else:
+                                face_rgb = cv2.cvtColor(
+                                    face_resized, cv2.COLOR_GRAY2RGB
+                                )
+                            face_normalized = face_rgb.astype(np.float32) / 255.0
+                            processed_face = np.expand_dims(face_normalized, axis=0)
+
+                            # Load model and predict
+                            model = get_cached_model(model_path)
+                            predictions = model.predict(processed_face, verbose=0)[0]
+                            confidence_scores = predictions * 100
+
+                            best_emotion_idx = np.argmax(confidence_scores)
+                            best_emotion = EMOTION_LABELS[best_emotion_idx]
+                            best_confidence = confidence_scores[best_emotion_idx]
+
+                            # Display results
+                            st.markdown(f"### **{best_emotion.capitalize()}**")
+                            st.markdown(f"**Confidence: {best_confidence:.1f}%**")
+
+                            # Display all emotions
+                            if show_confidence_bars:
+                                # Convert numpy arrays to Python floats for progress bars
+                                confidence_scores_float = [
+                                    float(score) for score in confidence_scores
+                                ]
+                                confidence_fig = create_confidence_bars(
+                                    confidence_scores_float
+                                )
+                                st.plotly_chart(
+                                    confidence_fig,
+                                    use_container_width=True,
+                                    config={"displayModeBar": False},
+                                )
+
+                            st.info("✅ Face detected and processed")
+
+                        else:
+                            st.warning("⚠️ No face detected in the image")
+
+                    except Exception as e:
+                        st.error(f"Error processing image: {e}")
 
     # Technical details (only show when not in video mode)
     if not st.session_state.video_running:
         with st.expander("Model Info"):
             st.markdown(
                 f"""
-            **HPO Optimized CNN** | {recognizer.model.count_params():,} params | {recognizer.model_input_size} | Threshold: {confidence_threshold}%
+            **HPO Optimized CNN** | 12.4M params | (48, 48, 3) | Threshold: {confidence_threshold}%
             """
             )
 
