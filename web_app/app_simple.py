@@ -333,8 +333,8 @@ def main():
 
         if st.button("← Back to Main Menu"):
             st.session_state.app_mode = "Model Analysis"
-            # Avoid rerun to prevent recursion - just update session state
-            pass
+            # Force page refresh to avoid recursion
+            st.experimental_rerun()
 
         st.stop()
 
@@ -502,8 +502,15 @@ def main():
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
 
         frame_count = 0
-        max_frames = 1000  # Limit to prevent infinite loops
-        while st.session_state.video_running and frame_count < max_frames:
+        max_frames = 100  # Much lower limit to prevent infinite loops
+        start_time = time.time()
+        max_duration = 30  # Maximum 30 seconds of video processing
+
+        while (
+            st.session_state.video_running
+            and frame_count < max_frames
+            and (time.time() - start_time) < max_duration
+        ):
             ret, frame = cap.read()
             if not ret:
                 st.error("❌ Failed to read from camera")
@@ -635,9 +642,14 @@ def main():
 
             time.sleep(0.1)
 
-        # Check if we hit the frame limit
+        # Check if we hit any limits
         if frame_count >= max_frames:
             st.warning(f"⚠️ Reached maximum frame limit ({max_frames}). Stopping video.")
+            st.session_state.video_running = False
+        elif (time.time() - start_time) >= max_duration:
+            st.warning(
+                f"⚠️ Reached maximum duration limit ({max_duration}s). Stopping video."
+            )
             st.session_state.video_running = False
 
         cap.release()

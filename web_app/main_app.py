@@ -154,18 +154,21 @@ def show_realtime_detection():
                 pass
 
         with col2:
-            st.subheader("Experimental")
+            st.subheader("Modern WebRTC Version")
             st.markdown(
                 """
-            **Try loading models anyway** (will likely fail due to version incompatibility)
+            **Real-time emotion detection using WebRTC**
+            - Works in browser (no local camera access needed)
+            - Modern technology stack
+            - Stable and fast
             """
             )
 
-            if st.button("Try Loading Models"):
+            if st.button("Try WebRTC Version", type="primary"):
                 try:
-                    from app_simple import main as app_main
+                    from app_webrtc import main as webrtc_main
 
-                    app_main()
+                    webrtc_main()
                 except Exception as e:
                     st.error("Model Loading Failed")
                     st.markdown(
