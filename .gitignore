@@ -69,3 +69,6 @@ Thumbs.db
 
 # Docker test environment (local testing only)
 docker-test/
+
+# VS Code Dev Container (local development only)
+.devcontainer/
