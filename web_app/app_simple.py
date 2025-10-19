@@ -172,21 +172,20 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                     )
                     self._last_log_ts = time.time()
             else:
-                # If recently had face - don't reset, show previous
-                if self.last_scores is not None and (now - self.last_seen) < max(
-                    self.hold_s, self.update_interval * 2
-                ):
-                    with self._lock:
+                # Never clear results immediately. Hold last valid values, clear only if face missing for long time (>2.5s)
+                age = now - self.last_seen  # сколько времени мы не видели лицо
+                with self._lock:
+                    if self.last_scores is not None and age < max(self.hold_s, 2.5):
+                        # держим последние валидные результаты
                         self.current_scores = self.last_scores
                         k = int(np.argmax(self.current_scores))
                         self.current_emotion = self.emotion_labels[k]
                         self.current_confidence = float(self.current_scores[k])
-                else:
-                    with self._lock:
+                    else:
+                        # очищаем ТОЛЬКО если лицо пропало заметно надолго
                         self.current_emotion = None
                         self.current_confidence = None
                         self.current_scores = None
-                        # Don't clear last_scores immediately - let UI catch up
 
                 # Debug logging for no face case
                 if (time.time() - self._last_log_ts) > 1.0:
@@ -211,11 +210,15 @@ def snapshot(proc):
             "ready": proc.ready.is_set(),
             "loaded": proc.model_loaded,
             "emotion": proc.current_emotion,
-            "conf": proc.current_confidence,
+            "conf": (
+                float(proc.current_confidence)
+                if proc.current_confidence is not None
+                else None
+            ),
             "scores": (
                 None if scores is None else np.asarray(scores, dtype=float).tolist()
             ),
-            "last_seen_age": time.time() - proc.last_seen if proc.last_seen else None,
+            "last_seen_age": (time.time() - proc.last_seen) if proc.last_seen else None,
         }
 
 
