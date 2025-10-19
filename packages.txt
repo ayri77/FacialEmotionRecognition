@@ -1,4 +1,3 @@
-# Минимальные рантайм зависимости для Streamlit Cloud
 libgl1
 libglib2.0-0
 libopus0

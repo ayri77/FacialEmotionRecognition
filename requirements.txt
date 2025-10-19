@@ -1,22 +1,13 @@
-# Streamlit
 streamlit==1.38.0
 streamlit-webrtc==0.47.7
 streamlit-autorefresh==1.0.1
-
-# Видео/аудио стек
 av==10.0.0
 aiortc==1.6.0
 pyee==11.1.0
 pylibsrtp==0.10.0
-
-# CV/ML
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
 tensorflow-cpu==2.15.0
-
-# Pillow/Plotly
 Pillow==10.3.0
 plotly==5.22.0
-
-# HTTP requests for model download
 requests==2.31.0
