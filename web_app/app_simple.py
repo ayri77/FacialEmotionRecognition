@@ -822,7 +822,11 @@ def main():
                             + "haarcascade_frontalface_default.xml"
                         )
                         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+                        # Try different parameters for better face detection
+                        # For small images (like training data), use more sensitive parameters
+                        faces = face_cascade.detectMultiScale(
+                            gray, 1.05, 3, minSize=(20, 20)
+                        )
 
                         if len(faces) > 0:
                             # Use largest face
@@ -872,7 +876,56 @@ def main():
                             st.info("✅ Face detected and processed")
 
                         else:
-                            st.warning("⚠️ No face detected in the image")
+                            # Fallback: if no face detected, try to process the entire image
+                            # This is useful for training images (48x48) that might not be detected by face cascade
+                            st.warning(
+                                "⚠️ No face detected, trying to process entire image..."
+                            )
+
+                            # Load model and predict on entire image
+                            model = get_cached_model(model_path)
+                            if model is not None:
+                                # Resize entire image to 48x48 and process
+                                img_resized = cv2.resize(frame, (48, 48))
+                                if len(img_resized.shape) == 3:
+                                    img_rgb = cv2.cvtColor(
+                                        img_resized, cv2.COLOR_BGR2RGB
+                                    )
+                                else:
+                                    img_rgb = cv2.cvtColor(
+                                        img_resized, cv2.COLOR_GRAY2RGB
+                                    )
+                                img_normalized = img_rgb.astype(np.float32) / 255.0
+                                processed_img = np.expand_dims(img_normalized, axis=0)
+
+                                predictions = model.predict(processed_img, verbose=0)[0]
+                                confidence_scores = predictions * 100
+
+                                best_emotion_idx = np.argmax(confidence_scores)
+                                best_emotion = EMOTION_LABELS[best_emotion_idx]
+                                best_confidence = confidence_scores[best_emotion_idx]
+
+                                # Display results
+                                st.markdown(f"### **{best_emotion.capitalize()}**")
+                                st.markdown(f"**Confidence: {best_confidence:.1f}%**")
+
+                                # Display all emotions
+                                if show_confidence_bars:
+                                    confidence_scores_float = [
+                                        float(score) for score in confidence_scores
+                                    ]
+                                    confidence_fig = create_confidence_bars(
+                                        confidence_scores_float
+                                    )
+                                    st.plotly_chart(
+                                        confidence_fig,
+                                        use_container_width=True,
+                                        config={"displayModeBar": False},
+                                    )
+
+                                st.info("✅ Image processed without face detection")
+                            else:
+                                st.error("❌ Model not available")
 
                     except Exception as e:
                         st.error(f"Error processing image: {e}")
