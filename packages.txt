@@ -1,5 +1,0 @@
-libgl1
-libglib2.0-0
-libopus0
-libvpx7
-ffmpeg
