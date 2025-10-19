@@ -129,9 +129,7 @@ def load_model_simple():
 
 
 def main():
-    st.set_page_config(
-        page_title="Facial Emotion Recognition - Minimal", page_icon="😊", layout="wide"
-    )
+    # Page config is handled in streamlit_app.py
 
     st.title("Facial Emotion Recognition - Minimal Version")
     st.markdown("**Simple, stable version without video processing**")

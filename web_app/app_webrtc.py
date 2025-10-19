@@ -183,9 +183,7 @@ def load_emotion_model():
 
 
 def main():
-    st.set_page_config(
-        page_title="Facial Emotion Recognition - WebRTC", page_icon="😊", layout="wide"
-    )
+    # Page config is handled in streamlit_app.py
 
     st.title("Facial Emotion Recognition - Real-time WebRTC")
     st.markdown("**Modern real-time emotion detection using WebRTC**")

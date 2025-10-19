@@ -10,10 +10,7 @@ import streamlit as st
 from PIL import Image
 from tensorflow.keras.models import load_model
 
-# Page configuration
-st.set_page_config(
-    page_title="Simple Live Emotion Recognition", page_icon="😊", layout="wide"
-)
+# Page configuration is handled in streamlit_app.py
 
 # Emotion labels
 EMOTION_LABELS = ["happy", "neutral", "sad", "surprise"]
