@@ -73,9 +73,9 @@ def ensure_model_available():
                 os.remove(path)
 
     # Model not found, download it
-    print("DEBUG: Model not found locally, downloading...")
+    print("DEBUG: Model not found locally, downloading from Hugging Face...")
     try:
-        if download_model_from_dropbox():
+        if download_model_from_huggingface():
             # Try to find the downloaded model
             for path in possible_paths:
                 if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -331,23 +331,23 @@ def is_recent(s, window=1.0):
     return (a is not None) and (a <= window)
 
 
-def download_model_from_dropbox():
-    """Download the best model from Dropbox"""
+def download_model_from_huggingface():
+    """Download the best model from Hugging Face"""
     import requests
 
     # Use absolute path for Streamlit Cloud
     model_path = os.path.join(os.getcwd(), "converted_best_hpo_optimized.keras")
-    dropbox_url = "https://www.dropbox.com/scl/fi/sx5r2umettw1ul8a2jb20/converted_best_hpo_optimized.keras?rlkey=qj150k3qhvdsiy59m7aktgh3u&st=rlqyj1q5&dl=1"
+    huggingface_url = "https://huggingface.co/ayri77/facial-emotion-cnn/resolve/main/converted_best_hpo_optimized.keras"
 
     try:
         # Download the model
         print(
-            "DEBUG: Downloading the best emotion recognition model (79.2% accuracy)..."
+            "DEBUG: Downloading the best emotion recognition model (79.2% accuracy) from Hugging Face..."
         )
-        print(f"DEBUG: Download URL: {dropbox_url}")
+        print(f"DEBUG: Download URL: {huggingface_url}")
         print(f"DEBUG: Target path: {model_path}")
 
-        response = requests.get(dropbox_url, stream=True, timeout=30)
+        response = requests.get(huggingface_url, stream=True, timeout=60)
         print(f"DEBUG: Response status: {response.status_code}")
         print(f"DEBUG: Response headers: {dict(response.headers)}")
 
@@ -405,8 +405,8 @@ def load_emotion_model():
         if model_path:
             return model_path
         else:
-            # Try to download the model from Dropbox
-            if download_model_from_dropbox():
+            # Try to download the model from Hugging Face
+            if download_model_from_huggingface():
                 # Try to find the downloaded model
                 for path in possible_paths:
                     if os.path.exists(path):
