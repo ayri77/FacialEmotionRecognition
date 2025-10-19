@@ -344,19 +344,41 @@ def download_model_from_dropbox():
         print(
             "DEBUG: Downloading the best emotion recognition model (79.2% accuracy)..."
         )
+        print(f"DEBUG: Download URL: {dropbox_url}")
+        print(f"DEBUG: Target path: {model_path}")
+
         response = requests.get(dropbox_url, stream=True, timeout=30)
+        print(f"DEBUG: Response status: {response.status_code}")
+        print(f"DEBUG: Response headers: {dict(response.headers)}")
+
         response.raise_for_status()
 
         # Save the model to current directory
+        total_size = 0
         with open(model_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+                if chunk:
+                    f.write(chunk)
+                    total_size += len(chunk)
 
-        print("DEBUG: Model downloaded successfully!")
-        return True
+        print(f"DEBUG: Model downloaded successfully! Size: {total_size} bytes")
+
+        # Verify the file was created and has content
+        if os.path.exists(model_path):
+            actual_size = os.path.getsize(model_path)
+            print(f"DEBUG: File exists, actual size: {actual_size} bytes")
+            if actual_size > 0:
+                return True
+            else:
+                print("DEBUG: Downloaded file is empty!")
+                return False
+        else:
+            print("DEBUG: Downloaded file does not exist!")
+            return False
 
     except Exception as e:
         print(f"DEBUG: Failed to download model: {str(e)}")
+        print(f"DEBUG: Exception type: {type(e).__name__}")
         return False
 
 
