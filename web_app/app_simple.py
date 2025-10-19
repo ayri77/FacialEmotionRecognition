@@ -1060,7 +1060,19 @@ def main():
                             processed_face = np.expand_dims(face_normalized, axis=0)
 
                             # Load model and predict
+                            if model_path is None:
+                                # Try to get model path for photo mode
+                                model_path = ensure_model_available()
+
+                            if model_path is None:
+                                st.error("Model not available. Please try again.")
+                                return
+
                             model = get_cached_model(model_path)
+                            if model is None:
+                                st.error("Failed to load model. Please try again.")
+                                return
+
                             predictions = model.predict(processed_face, verbose=0)[0]
                             confidence_scores = predictions * 100
 
@@ -1097,6 +1109,14 @@ def main():
                             )
 
                             # Load model and predict on entire image
+                            if model_path is None:
+                                # Try to get model path for photo mode
+                                model_path = ensure_model_available()
+
+                            if model_path is None:
+                                st.error("Model not available. Please try again.")
+                                return
+
                             model = get_cached_model(model_path)
                             if model is not None:
                                 # Resize entire image to 48x48 and process
