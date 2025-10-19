@@ -5,6 +5,7 @@ Full-featured real-time emotion detection using streamlit-webrtc
 
 import logging
 import os
+import threading
 import time
 import warnings
 from collections import deque
@@ -55,6 +56,10 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.current_scores = None
         self.model_loaded = False
 
+        # Threading for data synchronization
+        self._lock = threading.Lock()
+        self.ready = threading.Event()
+
         # Caching for stable overlay rendering
         self.last_bbox = None  # (x,y,w,h)
         self.last_text = None  # "emotion: 95.1%"
@@ -66,13 +71,17 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
     def load_model_once(self):
         if self.model_loaded:
             return True
-        self.model = get_cached_model(self.model_path)
-        if self.model is None:
+        model = get_cached_model(self.model_path)
+        if model is None:
             return False
-        self.face_cascade = cv2.CascadeClassifier(
+        face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
-        self.model_loaded = True
+        with self._lock:
+            self.model = model
+            self.face_cascade = face_cascade
+            self.model_loaded = True
+            self.ready.set()
         return True
 
     def preprocess_face(self, face, target_size):
@@ -116,8 +125,8 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
             self.last_update = now
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(
-                gray, 1.1, 3
-            )  # Reduced minNeighbors for more stable detection
+                gray, scaleFactor=1.2, minNeighbors=5, minSize=(60, 60)
+            )  # More stable face detection parameters
             if len(faces) > 0:
                 x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
                 roi = img[y : y + h, x : x + w]
@@ -125,34 +134,51 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                 preds = self.model.predict(sample, verbose=0)[0] * 100
                 scores = self.smooth_predictions(preds)
                 k = int(np.argmax(scores))
-                self.current_emotion = self.emotion_labels[k]
-                self.current_confidence = float(scores[k])
-                self.current_scores = scores
-                self.last_scores = scores  # Remember last good scores
-                self.last_bbox = (x, y, w, h)
-                self.last_text = (
-                    f"{self.current_emotion}: {self.current_confidence:.1f}%"
-                )
-                self.last_seen = now
+
+                # Update with lock to prevent race conditions
+                with self._lock:
+                    self.current_emotion = self.emotion_labels[k]
+                    self.current_confidence = float(scores[k])
+                    self.current_scores = scores
+                    self.last_scores = scores  # Remember last good scores
+                    self.last_bbox = (x, y, w, h)
+                    self.last_text = (
+                        f"{self.current_emotion}: {self.current_confidence:.1f}%"
+                    )
+                    self.last_seen = now
             else:
                 # If recently had face - don't reset, show previous
                 if self.last_scores is not None and (now - self.last_seen) < max(
                     self.hold_s, self.update_interval * 2
                 ):
-                    self.current_scores = self.last_scores
-                    k = int(np.argmax(self.current_scores))
-                    self.current_emotion = self.emotion_labels[k]
-                    self.current_confidence = float(self.current_scores[k])
+                    with self._lock:
+                        self.current_scores = self.last_scores
+                        k = int(np.argmax(self.current_scores))
+                        self.current_emotion = self.emotion_labels[k]
+                        self.current_confidence = float(self.current_scores[k])
                 else:
-                    self.current_emotion = None
-                    self.current_confidence = None
-                    self.current_scores = None
-                    # Don't clear last_scores immediately - let UI catch up
-                    # self.last_scores = None  # Keep for UI that updates later
+                    with self._lock:
+                        self.current_emotion = None
+                        self.current_confidence = None
+                        self.current_scores = None
+                        # Don't clear last_scores immediately - let UI catch up
+                        # self.last_scores = None  # Keep for UI that updates later
 
         # Draw last known overlay on EVERY frame
         self._draw_overlay(img)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+
+def snapshot(proc):
+    """Safely read processor data with lock"""
+    with proc._lock:
+        return {
+            "ready": proc.ready.is_set(),
+            "loaded": proc.model_loaded,
+            "emotion": proc.current_emotion,
+            "conf": proc.current_confidence,
+            "scores": proc.current_scores or proc.last_scores,
+        }
 
 
 def download_model_from_dropbox():
@@ -500,36 +526,43 @@ def main():
                 st.caption("Live video (WebRTC)")
 
                 # WebRTC Configuration with TURN server for NAT traversal
+                # RTC Configuration - start with STUN only for faster local startup
                 rtc_configuration = RTCConfiguration(
                     {
                         "iceServers": [
                             {"urls": ["stun:stun.l.google.com:19302"]},
-                            # Free TURN server for demo (for production, use your own TURN server)
-                            {
-                                "urls": ["turn:relay.metered.ca:80"],
-                                "username": "free",
-                                "credential": "free",
-                            },
-                            {
-                                "urls": ["turn:relay.metered.ca:443"],
-                                "username": "free",
-                                "credential": "free",
-                            },
-                            # For production, replace with your own TURN server:
-                            # {"urls": ["turn:your.turn.server:3478"], "username": "user", "credential": "pass"}
+                            # Add TURN servers if needed for NAT traversal:
+                            # {
+                            #     "urls": ["turn:relay.metered.ca:80"],
+                            #     "username": "free",
+                            #     "credential": "free",
+                            # },
+                            # {
+                            #     "urls": ["turn:relay.metered.ca:443"],
+                            #     "username": "free",
+                            #     "credential": "free",
+                            # },
                         ]
                     }
                 )
 
-                # WebRTC Streamer - recreate component with dynamic key for proper state management
-                webrtc_key = f"emotion-detection-{video_mode}-{int(st.session_state.video_running)}"
+                # WebRTC Streamer - fixed key for stability
                 webrtc_ctx = webrtc_streamer(
-                    key=webrtc_key,  # Key changes when video_running changes
+                    key="emotion-detection",  # Fixed key for stability
                     mode=WebRtcMode.SENDRECV,
                     video_processor_factory=lambda: WebRTCEmotionProcessor(model_path),
                     rtc_configuration=rtc_configuration,
-                    media_stream_constraints={"video": True, "audio": False},
-                    async_processing=False,  # Temporarily disabled for debugging
+                    media_stream_constraints={
+                        "video": {
+                            "width": {"ideal": 640},
+                            "height": {"ideal": 480},
+                            "frameRate": {
+                                "ideal": 15
+                            },  # Faster startup and more stable
+                        },
+                        "audio": False,
+                    },
+                    async_processing=True,  # Enable async for smooth UI
                     desired_playing_state=st.session_state.video_running,
                     video_html_attrs={
                         "controls": True,
@@ -603,29 +636,24 @@ def main():
                 )
                 processor = getattr(active_ctx, "video_processor", None)
 
-                if processor is not None:
-                    now = time.time()
-
-                    # Update main result display (throttled)
-                    if now - last_ui > 0.3:
-                        st.session_state.last_ui = now
-
-                        if processor.current_emotion is not None:
+                if processor is None:
+                    results_ph.info("🔄 Connecting WebRTC…")
+                else:
+                    s = snapshot(processor)
+                    if not s["ready"]:
+                        results_ph.info("⏳ Loading model…")
+                    elif s["scores"] is not None:
+                        now = time.time()
+                        # Update main result display (throttled)
+                        if now - last_ui > 0.3:
+                            st.session_state.last_ui = now
                             with results_ph:
                                 st.markdown(
-                                    f"### **{processor.current_emotion.capitalize()}**"
+                                    f"### **{(s['emotion'] or '').capitalize()}**"
                                 )
-                                st.markdown(
-                                    f"**Confidence: {processor.current_confidence:.1f}%**"
-                                )
-                        else:
-                            results_ph.info(
-                                f"👤 No face detected. Debug: Model loaded: {processor.model_loaded}, "
-                                f"Scores: {processor.current_scores is not None}, Emotion: {processor.current_emotion}"
-                            )
-                else:
-                    # сюда попадём только пока браузер ещё подключается
-                    results_ph.info("🔄 Connecting WebRTC…")
+                                st.markdown(f"**Confidence: {s['conf']:.1f}%**")
+                    else:
+                        results_ph.info("👤 No face detected.")
 
             # 1) Current bars (update more frequently for better responsiveness) - only when processor is available
             if video_mode == "WebRTC (Real-time)" and st.session_state.video_running:
@@ -639,9 +667,9 @@ def main():
                 processor = getattr(active_ctx, "video_processor", None)
 
                 if processor is not None:
-                    # Current bars (every ~0.5s) - use current_scores or fallback to last_scores
-                    scores = processor.current_scores or processor.last_scores
-                    if show_confidence_bars and scores is not None:
+                    s = snapshot(processor)
+                    # Current bars (every ~0.5s) - use snapshot scores
+                    if show_confidence_bars and s["scores"] is not None:
                         if (
                             time.time() - st.session_state.get("last_bars_ts", 0.0)
                             > 0.5
@@ -652,7 +680,7 @@ def main():
                                     [
                                         go.Bar(
                                             x=EMOTION_LABELS,
-                                            y=[float(s) for s in scores],
+                                            y=[float(s) for s in s["scores"]],
                                         )
                                     ]
                                 )
@@ -667,20 +695,15 @@ def main():
                                     config={"displayModeBar": False},
                                 )
 
-                    # History (every ~1s) - use current_scores or fallback to last_scores
-                    scores_for_history = (
-                        processor.current_scores or processor.last_scores
-                    )
+                    # History (every ~1s) - use snapshot scores
                     if (
-                        scores_for_history is not None
+                        s["scores"] is not None
                         and time.time() - st.session_state.last_hist_ts > 1.0
                     ):
                         st.session_state.last_hist_ts = time.time()
                         st.session_state.rt_times.append(st.session_state.last_hist_ts)
                         for i, e in enumerate(EMOTION_LABELS):
-                            st.session_state.rt_hist[e].append(
-                                float(scores_for_history[i])
-                            )
+                            st.session_state.rt_hist[e].append(float(s["scores"][i]))
 
                         if show_history:
                             with history_ph:
