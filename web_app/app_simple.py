@@ -68,8 +68,7 @@ def fetch_model_path() -> str:
             repo_id=REPO_ID,
             filename=MODEL_FILE,
             repo_type="model",  # явное указание типа репо
-            local_dir="models",  # будет ./models/<sha>/converted_best_hpo_optimized.keras
-            local_dir_use_symlinks=False,  # чтобы получить реальный файл, а не симлинк
+            local_dir="models",  # будет ./models/converted_best_hpo_optimized.keras
         )
         print(f"DEBUG: Download completed. Path: {path}")
         return path
