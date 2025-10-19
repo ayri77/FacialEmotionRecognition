@@ -59,26 +59,47 @@ def fetch_model_path() -> str:
     Скачивает файл модели с Hugging Face через huggingface_hub и
     возвращает локальный путь. Файл кешируется, повторно не качается.
     """
-    path = hf_hub_download(
-        repo_id=REPO_ID,
-        filename=MODEL_FILE,
-        repo_type="model",  # явное указание типа репо
-        local_dir="models",  # будет ./models/<sha>/converted_best_hpo_optimized.keras
-        local_dir_use_symlinks=False,  # чтобы получить реальный файл, а не симлинк
-    )
-    return path
+    print("DEBUG: Starting download from Hugging Face...")
+    print(f"DEBUG: REPO_ID: {REPO_ID}")
+    print(f"DEBUG: MODEL_FILE: {MODEL_FILE}")
+
+    try:
+        path = hf_hub_download(
+            repo_id=REPO_ID,
+            filename=MODEL_FILE,
+            repo_type="model",  # явное указание типа репо
+            local_dir="models",  # будет ./models/<sha>/converted_best_hpo_optimized.keras
+            local_dir_use_symlinks=False,  # чтобы получить реальный файл, а не симлинк
+        )
+        print(f"DEBUG: Download completed. Path: {path}")
+        return path
+    except Exception as e:
+        print(f"DEBUG: hf_hub_download failed: {e}")
+        print(f"DEBUG: Exception type: {type(e).__name__}")
+        raise
 
 
 def ensure_model_available() -> str | None:
     try:
+        print("DEBUG: ensure_model_available called")
         path = fetch_model_path()
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            print(f"DEBUG: model ready at {path}, size={os.path.getsize(path)}")
-            return path
-        print("DEBUG: model path exists but empty")
-        return None
+        print(f"DEBUG: fetch_model_path returned: {path}")
+
+        if os.path.exists(path):
+            size = os.path.getsize(path)
+            print(f"DEBUG: File exists at {path}, size: {size} bytes")
+            if size > 0:
+                print(f"DEBUG: model ready at {path}, size={size}")
+                return path
+            else:
+                print("DEBUG: model path exists but empty")
+                return None
+        else:
+            print(f"DEBUG: File does not exist at {path}")
+            return None
     except Exception as e:
-        print(f"DEBUG: fetch_model_path failed: {e}")
+        print(f"DEBUG: ensure_model_available failed: {e}")
+        print(f"DEBUG: Exception type: {type(e).__name__}")
         return None
 
 
@@ -457,11 +478,20 @@ def main():
 
         # Model diagnostic button
         if st.button("🧪 Check model file"):
-            p = ensure_model_available()
-            if p:
-                st.success(f"Model: {p} ({os.path.getsize(p)} bytes)")
-            else:
-                st.error("Model not available.")
+            st.write("**Debug Information:**")
+            st.write(f"REPO_ID: {REPO_ID}")
+            st.write(f"MODEL_FILE: {MODEL_FILE}")
+            st.write(f"Current directory: {os.getcwd()}")
+
+            try:
+                p = ensure_model_available()
+                if p:
+                    st.success(f"✅ Model: {p} ({os.path.getsize(p)} bytes)")
+                else:
+                    st.error("❌ Model not available.")
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+                st.write(f"Exception type: {type(e).__name__}")
 
         st.markdown("---")
 
