@@ -462,11 +462,6 @@ def smooth_predictions(recent_predictions):
 
 def main():
     """Main application function"""
-    # Debug mode toggle - always visible
-    st.session_state.debug_mode = st.toggle(
-        "🔧 Debug mode", value=st.session_state.debug_mode, key="debug_mode"
-    )
-
     # Compact header
     st.markdown("#### Real-time Emotion Detection")
 
@@ -515,8 +510,16 @@ def main():
     if "last_update_time" not in st.session_state:
         st.session_state.last_update_time = 0
 
+    # Debug mode toggle - separate sidebar block to ensure it's always visible
+    with st.sidebar:
+        st.session_state.debug_mode = st.toggle(
+            "🔧 Debug mode", value=st.session_state.debug_mode, key="debug_mode_fixed"
+        )
+        st.markdown("---")
+
     # Sidebar with all controls
     with st.sidebar:
+
         # Video mode selection
         video_mode = st.radio(
             "Video Mode",
