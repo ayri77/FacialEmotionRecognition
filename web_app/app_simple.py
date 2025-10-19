@@ -116,12 +116,31 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         """Load model if not already loaded"""
         if not self.model_loaded and self.model_path:
             try:
-                self.model = load_model(self.model_path, compile=False)
-                self.model_loaded = True
-                self.ready.set()
-                return True
+                # Load model with timeout to prevent blocking
+                import threading
+
+                def load_model_thread():
+                    try:
+                        self.model = load_model(self.model_path, compile=False)
+                        self.model_loaded = True
+                        self.ready.set()
+                        print("DEBUG: Model loaded successfully in processor")
+                    except Exception as e:
+                        print(f"DEBUG: Error loading model in processor: {e}")
+
+                # Start loading in background thread
+                if (
+                    not hasattr(self, "_loading_thread")
+                    or not self._loading_thread.is_alive()
+                ):
+                    self._loading_thread = threading.Thread(
+                        target=load_model_thread, daemon=True
+                    )
+                    self._loading_thread.start()
+
+                return self.model_loaded
             except Exception as e:
-                print(f"DEBUG: Error loading model in processor: {e}")
+                print(f"DEBUG: Error starting model load: {e}")
                 return False
         return self.model_loaded
 
@@ -180,7 +199,11 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                     )
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        if not self.load_model_once():
+        # Try to load model, but don't block if it's still loading
+        self.load_model_once()
+
+        # If model is not loaded yet, just return the frame without processing
+        if not self.model_loaded:
             return frame
         img = frame.to_ndarray(format="bgr24")
 
@@ -654,7 +677,7 @@ def main():
                         },
                         "audio": False,
                     },
-                    async_processing=True,  # Enable async for smooth UI
+                    async_processing=False,  # Disable async to prevent freezing
                     desired_playing_state=st.session_state.video_running,
                     video_html_attrs={
                         "controls": True,
