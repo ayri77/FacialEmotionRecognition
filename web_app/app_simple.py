@@ -79,6 +79,8 @@ def ensure_model_available():
 def get_model_once(model_path):
     """Simple thread-safe model cache without Streamlit dependencies"""
     global _MODEL, _MODEL_PATH
+    if model_path is None:
+        return None
     if _MODEL is None or _MODEL_PATH != model_path:
         _MODEL = load_model(model_path, compile=False)
         _MODEL_PATH = model_path
@@ -88,9 +90,10 @@ def get_model_once(model_path):
 class WebRTCEmotionProcessor(VideoProcessorBase):
     """WebRTC processor for real-time emotion detection"""
 
-    def __init__(self, model):
-        self.model = model
-        self.model_loaded = self.model is not None
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.model = None
+        self.model_loaded = False
         self.face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
@@ -108,6 +111,19 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.ready = threading.Event()
         if self.model_loaded:
             self.ready.set()
+
+    def load_model_once(self):
+        """Load model if not already loaded"""
+        if not self.model_loaded and self.model_path:
+            try:
+                self.model = load_model(self.model_path, compile=False)
+                self.model_loaded = True
+                self.ready.set()
+                return True
+            except Exception as e:
+                print(f"DEBUG: Error loading model in processor: {e}")
+                return False
+        return self.model_loaded
 
         # Caching for stable overlay rendering
         self.last_bbox = None  # (x,y,w,h)
@@ -164,7 +180,7 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                     )
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        if not self.model_loaded:
+        if not self.load_model_once():
             return frame
         img = frame.to_ndarray(format="bgr24")
 
@@ -420,9 +436,12 @@ def main():
     if DEBUG:
         print("[MAIN] model_path=", model_path)
         print("[MAIN] model_id=", id(model_obj))
-        st.info(
-            f"🧠 Model loaded: `{os.path.basename(model_path)}` (id={id(model_obj)})"
-        )
+        if model_path:
+            st.info(
+                f"🧠 Model loaded: `{os.path.basename(model_path)}` (id={id(model_obj)})"
+            )
+        else:
+            st.info("🧠 Model will be loaded when needed (lazy loading)")
 
     # Initialize session state
     if "emotion_history" not in st.session_state:
@@ -623,7 +642,7 @@ def main():
                 webrtc_ctx = webrtc_streamer(
                     key="emotion-detection",  # Fixed key for stability
                     mode=WebRtcMode.SENDRECV,
-                    video_processor_factory=lambda: WebRTCEmotionProcessor(model_obj),
+                    video_processor_factory=lambda: WebRTCEmotionProcessor(model_path),
                     rtc_configuration=rtc_configuration,
                     media_stream_constraints={
                         "video": {
