@@ -512,9 +512,10 @@ def main():
 
     # Debug mode toggle - separate sidebar block to ensure it's always visible
     with st.sidebar:
-        st.session_state.debug_mode = st.toggle(
+        debug_mode = st.toggle(
             "🔧 Debug mode", value=st.session_state.debug_mode, key="debug_mode_fixed"
         )
+        st.session_state.debug_mode = debug_mode
         st.markdown("---")
 
     # Sidebar with all controls
