@@ -3,7 +3,7 @@ streamlit-webrtc==0.47.*
 aiortc==1.6.*
 av>=9.0.0,<12.0.0
 opencv-python-headless==4.10.*
-tensorflow>=2.15.0,<2.20.0
+tensorflow>=2.20.0
 numpy>=1.24.0,<2.0.0
 pillow>=10.0.0
 plotly>=5.15.0
