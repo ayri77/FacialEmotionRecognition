@@ -59,9 +59,18 @@ def ensure_model_available():
         ),  # Absolute path
     ]
 
+    print(f"DEBUG: Checking for model in paths: {possible_paths}")
+    print(f"DEBUG: Current working directory: {os.getcwd()}")
+
     for path in possible_paths:
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            return path
+        if os.path.exists(path):
+            size = os.path.getsize(path)
+            print(f"DEBUG: Found model at {path}, size: {size} bytes")
+            if size > 0:
+                return path
+            else:
+                print(f"DEBUG: Model file {path} is empty, removing...")
+                os.remove(path)
 
     # Model not found, download it
     print("DEBUG: Model not found locally, downloading...")
@@ -69,11 +78,13 @@ def ensure_model_available():
         if download_model_from_dropbox():
             # Try to find the downloaded model
             for path in possible_paths:
-                if os.path.exists(path):
+                if os.path.exists(path) and os.path.getsize(path) > 0:
+                    print(f"DEBUG: Successfully downloaded model to {path}")
                     return path
     except Exception as e:
         print(f"DEBUG: Error downloading model: {e}")
 
+    print("DEBUG: Failed to ensure model availability")
     return None
 
 
@@ -81,10 +92,17 @@ def get_model_once(model_path):
     """Simple thread-safe model cache without Streamlit dependencies"""
     global _MODEL, _MODEL_PATH
     if model_path is None:
+        print("DEBUG: get_model_once called with None model_path")
         return None
     if _MODEL is None or _MODEL_PATH != model_path:
-        _MODEL = load_model(model_path, compile=False)
-        _MODEL_PATH = model_path
+        print(f"DEBUG: Loading model from {model_path}")
+        try:
+            _MODEL = load_model(model_path, compile=False)
+            _MODEL_PATH = model_path
+            print(f"DEBUG: Model loaded successfully, ID: {id(_MODEL)}")
+        except Exception as e:
+            print(f"DEBUG: Failed to load model: {e}")
+            return None
     return _MODEL
 
 
@@ -323,8 +341,10 @@ def download_model_from_dropbox():
 
     try:
         # Download the model
-        st.info("Downloading the best emotion recognition model (79.2% accuracy)...")
-        response = requests.get(dropbox_url, stream=True)
+        print(
+            "DEBUG: Downloading the best emotion recognition model (79.2% accuracy)..."
+        )
+        response = requests.get(dropbox_url, stream=True, timeout=30)
         response.raise_for_status()
 
         # Save the model to current directory
@@ -332,11 +352,11 @@ def download_model_from_dropbox():
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        st.success("Model downloaded successfully!")
+        print("DEBUG: Model downloaded successfully!")
         return True
 
     except Exception as e:
-        st.error(f"Failed to download model: {str(e)}")
+        print(f"DEBUG: Failed to download model: {str(e)}")
         return False
 
 
@@ -658,6 +678,18 @@ def main():
                         model_path = ensure_model_available()
                         if model_path is None:
                             st.error("❌ Failed to load emotion recognition model!")
+                            st.error("**Debug Information:**")
+                            st.code(
+                                f"""
+Current directory: {os.getcwd()}
+Model paths checked:
+- models/converted_best_hpo_optimized.keras
+- converted_best_hpo_optimized.keras
+- {os.path.join(os.getcwd(), 'converted_best_hpo_optimized.keras')}
+
+Please check the console logs for detailed error information.
+                            """
+                            )
                             st.info(
                                 "Please try again or switch to Model Analysis mode."
                             )
@@ -665,6 +697,19 @@ def main():
 
                 # Load model object for WebRTC processor
                 model_obj = get_model_once(model_path)
+                if model_obj is None:
+                    st.error("❌ Failed to load model object!")
+                    st.error("**Debug Information:**")
+                    st.code(
+                        f"""
+Model path: {model_path}
+Model exists: {os.path.exists(model_path) if model_path else False}
+Model size: {os.path.getsize(model_path) if model_path and os.path.exists(model_path) else 'N/A'} bytes
+
+Please check the console logs for detailed error information.
+                    """
+                    )
+                    st.stop()
 
                 # WebRTC Configuration with TURN server for NAT traversal
                 rtc_configuration = RTCConfiguration(
