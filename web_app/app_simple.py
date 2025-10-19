@@ -872,13 +872,20 @@ def main():
                                         go.Bar(
                                             x=EMOTION_LABELS,
                                             y=[float(s) for s in s["scores"]],
+                                            text=[
+                                                f"{float(s):.1f}%" for s in s["scores"]
+                                            ],
+                                            textposition="auto",
                                         )
                                     ]
                                 )
                                 fig.update_layout(
-                                    height=180,
-                                    margin=dict(l=0, r=0, t=10, b=0),
+                                    height=220,
+                                    margin=dict(l=0, r=0, t=20, b=20),
                                     showlegend=False,
+                                    yaxis=dict(
+                                        tickformat=".1f", title="Confidence (%)"
+                                    ),
                                 )
                                 st.plotly_chart(
                                     fig,
@@ -908,9 +915,10 @@ def main():
                                         mode="lines",
                                     )
                                 hist_fig.update_layout(
-                                    height=220,
-                                    margin=dict(l=0, r=0, t=10, b=0),
+                                    height=280,
+                                    margin=dict(l=0, r=0, t=20, b=20),
                                     legend=dict(orientation="h"),
+                                    yaxis=dict(tickformat=".3f", title="Probability"),
                                 )
                                 st.plotly_chart(
                                     hist_fig,
