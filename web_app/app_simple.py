@@ -47,6 +47,35 @@ _MODEL_PATH = None
 DEBUG = st.sidebar.toggle("🔧 Debug mode", value=True, key="debug_mode")
 
 
+def ensure_model_available():
+    """Ensure model is available, download if needed (lazy loading)"""
+    # Check if model is already downloaded
+    possible_paths = [
+        "models/converted_best_hpo_optimized.keras",  # Local development
+        "converted_best_hpo_optimized.keras",  # Streamlit Cloud root
+        os.path.join(
+            os.getcwd(), "converted_best_hpo_optimized.keras"
+        ),  # Absolute path
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return path
+
+    # Model not found, download it
+    print("DEBUG: Model not found locally, downloading...")
+    try:
+        if download_model_from_dropbox():
+            # Try to find the downloaded model
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+    except Exception as e:
+        print(f"DEBUG: Error downloading model: {e}")
+
+    return None
+
+
 def get_model_once(model_path):
     """Simple thread-safe model cache without Streamlit dependencies"""
     global _MODEL, _MODEL_PATH
@@ -381,32 +410,11 @@ def main():
     # Compact header
     st.markdown("#### Real-time Emotion Detection")
 
-    # Load model (hide loading messages)
-    model_path = load_emotion_model()
-    if model_path is None:
-        st.error("❌ Failed to load or create emotion recognition model!")
-        st.markdown(
-            """
-        **The application cannot run without a model.**
+    # Initialize model path (will be loaded lazily when needed)
+    model_path = None
 
-        **Options:**
-        1. **Use Model Analysis mode** - View comprehensive project results without real-time detection
-        2. **Download trained models** - See [MODEL_DOWNLOAD.md](../MODEL_DOWNLOAD.md) for instructions
-        3. **Run locally with models** - Copy models to the `models/` directory
-
-        **For demonstration purposes**, you can use the Model Analysis mode to see all project achievements and model performance.
-        """
-        )
-
-        if st.button("← Back to Main Menu"):
-            st.session_state.app_mode = "Model Analysis"
-            # Force page refresh to avoid recursion
-            st.rerun()
-
-        st.stop()
-
-    # Load model object for WebRTC processor
-    model_obj = get_model_once(model_path)
+    # Load model object for WebRTC processor (will be loaded when needed)
+    model_obj = None
 
     # Debug: show model information
     if DEBUG:
@@ -577,23 +585,36 @@ def main():
             with video_box:
                 st.caption("Live video (WebRTC)")
 
+                # Lazy model loading - only when WebRTC mode is selected
+                if model_path is None:
+                    with st.spinner("Loading model..."):
+                        model_path = ensure_model_available()
+                        if model_path is None:
+                            st.error("❌ Failed to load emotion recognition model!")
+                            st.info(
+                                "Please try again or switch to Model Analysis mode."
+                            )
+                            st.stop()
+
+                # Load model object for WebRTC processor
+                model_obj = get_model_once(model_path)
+
                 # WebRTC Configuration with TURN server for NAT traversal
-                # RTC Configuration - start with STUN only for faster local startup
                 rtc_configuration = RTCConfiguration(
                     {
                         "iceServers": [
                             {"urls": ["stun:stun.l.google.com:19302"]},
-                            # Add TURN servers if needed for NAT traversal:
-                            # {
-                            #     "urls": ["turn:relay.metered.ca:80"],
-                            #     "username": "free",
-                            #     "credential": "free",
-                            # },
-                            # {
-                            #     "urls": ["turn:relay.metered.ca:443"],
-                            #     "username": "free",
-                            #     "credential": "free",
-                            # },
+                            # TURN servers for NAT traversal (free tier)
+                            {
+                                "urls": ["turn:relay.metered.ca:80"],
+                                "username": "free",
+                                "credential": "free",
+                            },
+                            {
+                                "urls": ["turn:relay.metered.ca:443"],
+                                "username": "free",
+                                "credential": "free",
+                            },
                         ]
                     }
                 )

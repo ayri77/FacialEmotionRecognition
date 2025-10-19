@@ -1,9 +1,6 @@
-pkg-config
-libavformat-dev
-libavcodec-dev
-libavdevice-dev
-libavutil-dev
-libswscale-dev
-libswresample-dev
-libavfilter-dev
-libsndfile1-dev
+# Минимальные рантайм зависимости для Streamlit Cloud
+libgl1
+libglib2.0-0
+libopus0
+libvpx7
+ffmpeg
