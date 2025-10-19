@@ -43,8 +43,9 @@ EMOTION_COLORS = {
 _MODEL = None
 _MODEL_PATH = None
 
-# Debug mode toggle
-DEBUG = st.sidebar.toggle("🔧 Debug mode", value=True, key="debug_mode")
+# Debug mode toggle - moved to main area to ensure visibility
+if "debug_mode" not in st.session_state:
+    st.session_state.debug_mode = True
 
 
 def ensure_model_available():
@@ -196,7 +197,7 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
                     2,
                 )
                 # Debug: show model ID
-                if DEBUG:
+                if st.session_state.debug_mode:
                     cv2.putText(
                         img,
                         f"id:{self.model_id}",
@@ -461,6 +462,11 @@ def smooth_predictions(recent_predictions):
 
 def main():
     """Main application function"""
+    # Debug mode toggle - always visible
+    st.session_state.debug_mode = st.toggle(
+        "🔧 Debug mode", value=st.session_state.debug_mode, key="debug_mode"
+    )
+
     # Compact header
     st.markdown("#### Real-time Emotion Detection")
 
@@ -471,7 +477,7 @@ def main():
     model_obj = None
 
     # Debug: show model information
-    if DEBUG:
+    if st.session_state.debug_mode:
         print("[MAIN] model_path=", model_path)
         print("[MAIN] model_id=", id(model_obj))
         if model_path:
@@ -721,9 +727,9 @@ def main():
                         key="rec_poll",  # стабильный ключ
                         limit=None,  # без ограничения
                     )
-                    if DEBUG:
+                    if st.session_state.debug_mode:
                         st.caption("🔄 Auto-refresh active")
-                elif DEBUG:
+                elif st.session_state.debug_mode:
                     if is_playing:
                         st.caption("⏸️ Video playing - recognition paused")
                     else:
@@ -776,7 +782,9 @@ def main():
                 st.session_state.recognition_active = False
 
             # Debug panel
-            dbg_box = st.expander("🔎 Debug panel", expanded=DEBUG)
+            dbg_box = st.expander(
+                "🔎 Debug panel", expanded=st.session_state.debug_mode
+            )
 
             # Single placeholder for results with throttling
             results_ph = st.empty()
@@ -805,7 +813,7 @@ def main():
                 processor = getattr(active_ctx, "video_processor", None)
 
                 # Debug information
-                if DEBUG:
+                if st.session_state.debug_mode:
                     ctx_info = {
                         "playing": bool(webrtc_ctx and webrtc_ctx.state.playing),
                         "ctx_exists": webrtc_ctx is not None,
