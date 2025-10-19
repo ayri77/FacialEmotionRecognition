@@ -17,7 +17,6 @@ import plotly.graph_objects as go
 import streamlit as st
 from huggingface_hub import hf_hub_download
 from PIL import Image
-from streamlit_autorefresh import st_autorefresh
 from streamlit_webrtc import (
     RTCConfiguration,
     VideoProcessorBase,
@@ -669,17 +668,8 @@ def main():
                     mode=WebRtcMode.SENDRECV,
                     video_processor_factory=lambda: WebRTCEmotionProcessor(model_path),
                     rtc_configuration=rtc_configuration,
-                    media_stream_constraints={
-                        "video": {
-                            "width": {"ideal": 640},
-                            "height": {"ideal": 480},
-                            "frameRate": {
-                                "ideal": 15
-                            },  # Faster startup and more stable
-                        },
-                        "audio": False,
-                    },
-                    async_processing=False,  # Disable async to prevent freezing
+                    media_stream_constraints={"video": True, "audio": False},
+                    async_processing=True,  # Включаем обратно - меньше блокировок основного цикла
                     desired_playing_state=st.session_state.video_running,
                     video_html_attrs={
                         "controls": True,
@@ -697,20 +687,14 @@ def main():
                 is_playing = bool(webrtc_ctx and webrtc_ctx.state.playing)
                 recognition_active = st.session_state.get("recognition_active", False)
 
-                # Автоматическое обновление UI с помощью streamlit-autorefresh
-                # ⛔️ удаляем/комментим блок с условным st.rerun — он даёт ровно один перезапуск
-                # ✅ лёгкий автотик, пока видео играет и распознавание активно:
-                if is_playing and st.session_state.get("recognition_active", False):
-                    st_autorefresh(
-                        interval=int(
-                            1000 * max(0.5, float(st.session_state.update_frequency))
-                        ),
-                        key="rec_poll",  # стабильный ключ
-                        limit=None,  # без ограничения
-                    )
-                    if st.session_state.debug_mode:
-                        st.caption("🔄 Auto-refresh active")
-                elif st.session_state.debug_mode:
+                # Убираем автообновление во время WebRTC соединения - оно мешает ICE-обмену
+                # if is_playing and st.session_state.get("recognition_active", False):
+                #     st_autorefresh(...)  # Закомментировано - мешает WebRTC
+
+                # Безопасная проверка статуса без перерисовок
+                st.caption(f"playing={bool(webrtc_ctx and webrtc_ctx.state.playing)}")
+
+                if st.session_state.debug_mode:
                     if is_playing:
                         st.caption("⏸️ Video playing - recognition paused")
                     else:
@@ -746,7 +730,7 @@ def main():
                 ):
                     st.session_state.recognition_active = True
                     st.success("Recognition started!")
-                    st.rerun()  # Immediately trigger auto-refresh
+                    # Убираем st.rerun() - он мешает WebRTC соединению
             with col_stop:
                 if st.button("⏹️ Stop Recognition", key="stop_recognition"):
                     st.session_state.recognition_active = False
