@@ -11,13 +11,7 @@ import streamlit as st
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Page configuration
-st.set_page_config(
-    page_title="Facial Emotion Recognition",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Page configuration removed - handled by streamlit_app.py
 
 
 def main():

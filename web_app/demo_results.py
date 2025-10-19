@@ -7,13 +7,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Page configuration
-st.set_page_config(
-    page_title="Facial Emotion Recognition - Results Demo",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Page configuration removed - handled by main app
 
 
 # Load results data
