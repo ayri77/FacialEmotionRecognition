@@ -651,6 +651,23 @@ def main():
         with col_stats:
             st.caption("Results")
 
+            # Recognition control buttons
+            col_start, col_stop = st.columns(2)
+            with col_start:
+                if st.button(
+                    "▶️ Start Recognition", type="primary", key="start_recognition"
+                ):
+                    st.session_state.recognition_active = True
+                    st.success("Recognition started!")
+            with col_stop:
+                if st.button("⏹️ Stop Recognition", key="stop_recognition"):
+                    st.session_state.recognition_active = False
+                    st.info("Recognition stopped!")
+
+            # Initialize recognition state if not exists
+            if "recognition_active" not in st.session_state:
+                st.session_state.recognition_active = False
+
             # Debug panel
             dbg_box = st.expander("🔎 Debug panel", expanded=DEBUG)
 
@@ -712,6 +729,10 @@ def main():
                     results_ph.info("🔄 Connecting WebRTC…")
                 elif not processor.model_loaded:
                     results_ph.info("⏳ Loading model…")
+                elif not st.session_state.get("recognition_active", False):
+                    results_ph.info(
+                        "⏸️ Recognition paused. Click 'Start Recognition' to begin."
+                    )
                 else:
                     s = snapshot(processor)
                     if s["scores"] is not None:
@@ -738,7 +759,9 @@ def main():
                 )
                 processor = getattr(active_ctx, "video_processor", None)
 
-                if processor is not None:
+                if processor is not None and st.session_state.get(
+                    "recognition_active", False
+                ):
                     s = snapshot(processor)
                     # Current bars (every ~0.5s) - use snapshot scores
                     if show_confidence_bars and s["scores"] is not None:
