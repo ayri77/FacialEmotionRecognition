@@ -1,13 +1,29 @@
-streamlit==1.39.*
-streamlit-webrtc==0.47.*
-aiortc==1.6.*
-av>=9.0.0,<12.0.0
-opencv-python-headless==4.10.*
-tensorflow>=2.20.0
-numpy>=1.24.0,<2.0.0
-pillow>=10.0.0
-plotly>=5.15.0
-pandas>=2.0.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
-requests>=2.28.0
+# Streamlit
+streamlit==1.37.1
+streamlit-webrtc==0.47.4
+streamlit-autorefresh>=0.0.3
+
+# Видео/аудио стек
+av==10.0.0            # PyAV: есть готовые колёса; дружит с aiortc 1.5.x
+aiortc==1.5.0
+pyee==11.1.0
+pylibsrtp==0.10.0     # колёса; но всё равно нужен libsrtp2-dev (см. packages.txt)
+
+# CV/ML
+opencv-python-headless==4.9.0.80  # headless-версия без X11
+numpy==1.26.4                     # совместима с TF 2.13/2.14
+tensorflow-cpu==2.13.1            # под Py 3.11 есть wheels; легче, чем tensorflow
+# Pillow/Plotly
+Pillow==10.3.0
+plotly==5.22.0
+
+# для OpenCV и работы видео
+ffmpeg
+libsm6
+libxext6
+libgl1
+libglib2.0-0
+
+# для WebRTC/aiortc (SRTP)
+libsrtp2-1
+libsrtp2-dev

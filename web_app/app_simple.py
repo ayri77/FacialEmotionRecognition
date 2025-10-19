@@ -16,6 +16,7 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
+from streamlit_autorefresh import st_autorefresh
 from streamlit_webrtc import (
     RTCConfiguration,
     VideoProcessorBase,
@@ -68,7 +69,7 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self.model_input_size = (48, 48)
         self.recent_predictions = deque(maxlen=5)
         self.last_update = 0.0
-        self.update_interval = 0.5  # Increased for more stable detection
+        self.update_interval = 0.2  # More frequent updates for real-time feel
         self.current_emotion = None
         self.current_confidence = None
         self.current_scores = None
@@ -220,6 +221,12 @@ def snapshot(proc):
             ),
             "last_seen_age": (time.time() - proc.last_seen) if proc.last_seen else None,
         }
+
+
+def is_recent(s, window=1.0):
+    """Check if data is recent (within window seconds)"""
+    a = s.get("last_seen_age")
+    return (a is not None) and (a <= window)
 
 
 def download_model_from_dropbox():
@@ -625,19 +632,24 @@ def main():
                 is_playing = bool(webrtc_ctx and webrtc_ctx.state.playing)
                 recognition_active = st.session_state.get("recognition_active", False)
 
-                if is_playing and recognition_active:
-                    last = st.session_state.get("last_refresh_ts", 0.0)
-                    now = time.time()
-                    if (now - last) > max(0.5, float(update_frequency)):
-                        st.session_state["last_refresh_ts"] = now
-                        # Обновляем UI для активного распознавания
-                        st.rerun()
-                        if DEBUG:
-                            st.caption("↻ auto-refresh (recognition active)")
-                elif is_playing:
-                    # Видео играет, но распознавание не активно - показываем тик без обновления
+                # Автоматическое обновление UI с помощью streamlit-autorefresh
+                # ⛔️ удаляем/комментим блок с условным st.rerun — он даёт ровно один перезапуск
+                # ✅ лёгкий автотик, пока видео играет и распознавание активно:
+                if is_playing and st.session_state.get("recognition_active", False):
+                    st_autorefresh(
+                        interval=int(
+                            1000 * max(0.5, float(st.session_state.update_frequency))
+                        ),
+                        key="rec_poll",  # стабильный ключ
+                        limit=None,  # без ограничения
+                    )
                     if DEBUG:
-                        st.caption("↻ tick (no rerun - recognition paused)")
+                        st.caption("🔄 Auto-refresh active")
+                elif DEBUG:
+                    if is_playing:
+                        st.caption("⏸️ Video playing - recognition paused")
+                    else:
+                        st.caption("⏹️ Video stopped")
 
                 # Status updates through fixed placeholder
                 if webrtc_ctx.state.playing and webrtc_ctx.video_processor:
@@ -750,10 +762,10 @@ def main():
                     )
                 else:
                     s = snapshot(processor)
-                    if s["scores"] is not None:
+                    if s["scores"] is not None and is_recent(s, 1.0):
                         now = time.time()
                         # Update main result display (throttled)
-                        if now - last_ui > 0.3:
+                        if now - last_ui > 0.1:
                             st.session_state.last_ui = now
                             with results_ph:
                                 st.markdown(
@@ -761,7 +773,7 @@ def main():
                                 )
                                 st.markdown(f"**Confidence: {s['conf']:.1f}%**")
                     else:
-                        results_ph.info("👤 No face detected.")
+                        results_ph.info("👤 No recent face (last > 1s).")
 
             # 1) Current bars (update more frequently for better responsiveness) - only when processor is available
             if video_mode == "WebRTC (Real-time)" and st.session_state.video_running:
@@ -782,7 +794,7 @@ def main():
                     if show_confidence_bars and s["scores"] is not None:
                         if (
                             time.time() - st.session_state.get("last_bars_ts", 0.0)
-                            > 0.5
+                            > 0.2
                         ):
                             st.session_state["last_bars_ts"] = time.time()
                             with bars_ph:
@@ -808,7 +820,7 @@ def main():
                     # History (every ~1s) - use snapshot scores
                     if (
                         s["scores"] is not None
-                        and time.time() - st.session_state.last_hist_ts > 1.0
+                        and time.time() - st.session_state.last_hist_ts > 0.5
                     ):
                         st.session_state.last_hist_ts = time.time()
                         st.session_state.rt_times.append(st.session_state.last_hist_ts)
