@@ -5,6 +5,7 @@ Full-featured real-time emotion detection using streamlit-webrtc
 
 import logging
 import os
+import sys
 import threading
 import time
 import warnings
@@ -12,6 +13,7 @@ from collections import deque
 
 import av
 import cv2
+import huggingface_hub as hf_hub
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -61,8 +63,15 @@ def fetch_model_path() -> str:
     print("DEBUG: Starting download from Hugging Face...")
     print(f"DEBUG: REPO_ID: {REPO_ID}")
     print(f"DEBUG: MODEL_FILE: {MODEL_FILE}")
+    print(f"DEBUG: Current working directory: {os.getcwd()}")
+    print(f"DEBUG: Python version: {sys.version}")
+    print(f"DEBUG: Hugging Face Hub version: {hf_hub.__version__}")
 
     try:
+        # Создаем директорию models если её нет
+        os.makedirs("models", exist_ok=True)
+        print("DEBUG: Created models directory")
+
         path = hf_hub_download(
             repo_id=REPO_ID,
             filename=MODEL_FILE,
@@ -70,10 +79,17 @@ def fetch_model_path() -> str:
             local_dir="models",  # будет ./models/converted_best_hpo_optimized.keras
         )
         print(f"DEBUG: Download completed. Path: {path}")
+        print(f"DEBUG: Path exists: {os.path.exists(path)}")
+        if os.path.exists(path):
+            print(f"DEBUG: File size: {os.path.getsize(path)} bytes")
         return path
     except Exception as e:
         print(f"DEBUG: hf_hub_download failed: {e}")
         print(f"DEBUG: Exception type: {type(e).__name__}")
+        print(f"DEBUG: Exception details: {str(e)}")
+        import traceback
+
+        print(f"DEBUG: Traceback: {traceback.format_exc()}")
         raise
 
 
@@ -480,8 +496,24 @@ def main():
             st.write(f"REPO_ID: {REPO_ID}")
             st.write(f"MODEL_FILE: {MODEL_FILE}")
             st.write(f"Current directory: {os.getcwd()}")
+            st.write(f"Python version: {sys.version}")
+            st.write(f"Platform: {sys.platform}")
+
+            # Check if models directory exists
+            models_dir = "models"
+            st.write(f"Models directory exists: {os.path.exists(models_dir)}")
+            if os.path.exists(models_dir):
+                st.write(f"Models directory contents: {os.listdir(models_dir)}")
+
+            # Check if model file exists locally
+            expected_path = os.path.join(models_dir, MODEL_FILE)
+            st.write(f"Expected model path: {expected_path}")
+            st.write(f"Model file exists: {os.path.exists(expected_path)}")
+            if os.path.exists(expected_path):
+                st.write(f"Model file size: {os.path.getsize(expected_path)} bytes")
 
             try:
+                st.write("**Attempting to download/load model...**")
                 p = ensure_model_available()
                 if p:
                     st.success(f"✅ Model: {p} ({os.path.getsize(p)} bytes)")
@@ -490,6 +522,9 @@ def main():
             except Exception as e:
                 st.error(f"❌ Error: {e}")
                 st.write(f"Exception type: {type(e).__name__}")
+                import traceback
+
+                st.code(traceback.format_exc())
 
         st.markdown("---")
 
@@ -521,8 +556,7 @@ def main():
                 for emotion in st.session_state.rt_hist:
                     st.session_state.rt_hist[emotion].clear()
             st.session_state.last_video_mode = video_mode
-            # Force rerun to clear UI
-            st.rerun()
+            # Убираем st.rerun() - он мешает WebRTC соединению
 
         # Video controls
         st.markdown("**Video Controls**")
@@ -661,6 +695,10 @@ def main():
                         ]
                     }
                 )
+
+                # Явный вывод конфигурации для диагностики
+                if st.session_state.debug_mode:
+                    st.write("RTCConfiguration:", rtc_configuration)
 
                 # WebRTC Streamer - fixed key for stability
                 webrtc_ctx = webrtc_streamer(
