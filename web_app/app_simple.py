@@ -124,6 +124,9 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
         self._last_log_ts = 0.0
         self.model_id = id(self.model)
 
+        # Recognition state
+        self.recognition_active = False
+
     def load_model_once(self):
         """Load model if not already loaded"""
         if not self.model_loaded and self.model_path:
@@ -173,7 +176,13 @@ class WebRTCEmotionProcessor(VideoProcessorBase):
 
     def _draw_overlay(self, img):
         """Draw cached overlay on every frame to prevent flickering"""
-        if self.last_bbox and (time.time() - self.last_seen) * 1000 < self.hold_ms:
+        # Only draw overlay if model is loaded, recognition is active, and we have recent data
+        if (
+            self.model_loaded
+            and self.recognition_active
+            and self.last_bbox
+            and (time.time() - self.last_seen) * 1000 < self.hold_ms
+        ):
             x, y, w, h = self.last_bbox
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
             if self.last_text:
@@ -722,6 +731,10 @@ def main():
 
                 # Status updates through fixed placeholder
                 if webrtc_ctx.state.playing and webrtc_ctx.video_processor:
+                    # Update recognition state in processor
+                    webrtc_ctx.video_processor.recognition_active = (
+                        st.session_state.get("recognition_active", False)
+                    )
                     status_box.write(
                         "🎥 Camera access granted! Emotion detection is active."
                     )
