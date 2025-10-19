@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-import tensorflow as tf
+from huggingface_hub import hf_hub_download
 from PIL import Image
 from streamlit_autorefresh import st_autorefresh
 from streamlit_webrtc import (
@@ -32,11 +32,9 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 warnings.filterwarnings("ignore")
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
-# Hugging Face model URL
-HF_MODEL_URL = (
-    "https://huggingface.co/ayri77/facial-emotion-cnn/resolve/main/"
-    "converted_best_hpo_optimized.keras?download=true"
-)
+# Hugging Face model configuration
+REPO_ID = "ayri77/facial-emotion-cnn"
+MODEL_FILE = "converted_best_hpo_optimized.keras"
 
 EMOTION_LABELS = ["happy", "neutral", "sad", "surprise"]
 EMOTION_COLORS = {
@@ -58,15 +56,15 @@ if "debug_mode" not in st.session_state:
 @st.cache_resource(show_spinner=True)
 def fetch_model_path() -> str:
     """
-    Скачивает .keras с Hugging Face и возвращает локальный путь.
-    Файл кэшируется в ./models, повторно не качается.
+    Скачивает файл модели с Hugging Face через huggingface_hub и
+    возвращает локальный путь. Файл кешируется, повторно не качается.
     """
-    path = tf.keras.utils.get_file(
-        fname="converted_best_hpo_optimized.keras",
-        origin=HF_MODEL_URL,
-        cache_dir=".",  # текущая папка проекта
-        cache_subdir="models",  # ./models/converted_best_hpo_optimized.keras
-        extract=False,
+    path = hf_hub_download(
+        repo_id=REPO_ID,
+        filename=MODEL_FILE,
+        repo_type="model",  # явное указание типа репо
+        local_dir="models",  # будет ./models/<sha>/converted_best_hpo_optimized.keras
+        local_dir_use_symlinks=False,  # чтобы получить реальный файл, а не симлинк
     )
     return path
 

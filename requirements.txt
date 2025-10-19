@@ -14,3 +14,4 @@ scipy==1.11.4
 plotly==5.23.0
 Pillow==10.4.0
 tensorflow-cpu==2.16.1
+huggingface_hub==0.24.6
